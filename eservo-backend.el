@@ -58,10 +58,18 @@ these ops, question whether it belongs in eservo v0.1 at all."
   (cookies-get nil :documentation "(FN DRIVER) return list of cookie alists.")
   (cookies-set nil :documentation "(FN DRIVER COOKIE-ALIST-LIST) restore cookies."))
 
-(defun eservo-backend-registered ()
-  "Return the registry of known backends (symbol -> constructor plist)."
+(defconst eservo-backend--builtins
   '((cdp . eservo-cdp-make-backend)
-    (adb . eservo-adb-make-backend)))
+    (adb . eservo-adb-make-backend))
+  "Backends shipped with eservo (symbol -> constructor function).")
+
+(defvar eservo-backend-registry nil
+  "Alist of (BACKEND-SYMBOL . CONSTRUCTOR-FUNCTION) added outside
+eservo (users, tests).  Consulted before `eservo-backend--builtins'.")
+
+(defun eservo-backend-registered ()
+  "All known backends: registry entries first, then builtins."
+  (append eservo-backend-registry eservo-backend--builtins))
 
 (defun eservo-backend-make (name)
   "Construct the backend named NAME (symbol) from the registry.
