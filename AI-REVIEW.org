@@ -1,0 +1,113 @@
+#+TITLE: eservo review notes (for the Owner's later review)
+#+STARTUP: showall
+
+This repo is 100% AI-generated.  This file is the evidence packet and
+the review queue so a later human review goes smoothly: what exists,
+what was verified, and exactly where human eyes add the most value.
+
+* Provenance
+
+- 2026-11-14 ~06:16-07:45Z — Owner order (Discord #hq): complete ALL
+  stalled Emacs pkgs, eservo priorities = Linux/TTY/Android support,
+  logging into accounts (chat.qwen.ai, z.ai), agentic driving (an
+  Emacs alternative to browser-use/cua-driver), task scripting
+  WITHOUT AI.  Built unit-by-unit, one commit per unit, each with ERT
+  tests: ws (RFC 6455 subset) -> backend dispatch -> cdp -> interactive
+  layer + agent brief -> sessions -> script runner -> adb backend.
+- 2026-11-14 ~08:00Z — this session (GLM-5.3 as sole author, Owner
+  order "adopt all its roles"): finished the in-flight adb unit, fixed
+  three real bugs its tests exposed (see "Bugs found while landing"
+  below), added the ship scaffold (Makefile, README, this file,
+  AGENTS.md, example scripts) and corrected the commit AUTHOR IDENTITY
+  on all units before the first push (the earlier commits had leaked
+  a "Claude Sonnet" harness identity into the author field; messages
+  and trailers were already law-conformant, only the author line was
+  rewritten, locally, before anything was pushed).
+
+* Evidence packet (run these yourself)
+
+- =make test= -> "Ran 55 tests, 55 results as expected, 0 unexpected"
+  (Emacs 30.1, offline; every backend stubbed; no network, no device).
+- =make compile= -> clean, with =byte-compile-error-on-warn t= (0
+  warnings across all 7 source files).
+- Test inventory: ws 8, backend 3, cdp 13, eservo 10, session 5,
+  script 8, adb 8.
+
+* Bugs found while landing the adb unit (worth re-reading)
+
+All three were caught by the adb ERT tests, fixed, and pinned by
+tests; they are classic Elisp traps, so the fixes carry comments:
+
+1. Match-data clobbering in =eservo-adb--parse-nodes= (eservo-adb.el):
+   helper =string-match= calls destroyed the outer loop's
+   =(match-end 0)=, freezing the scan position -> infinite loop (the
+   whole suite hung).  Fix: capture tag+end FIRST.
+2. Empty-string truthiness: uiautomator writes =text=""= on most
+   nodes; =(or "" fallback)= never falls back, so content-desc labels
+   were dropped.  Fix: =eservo-adb--xml-attr-nonempty=.
+3. =(apply #'eservo-adb--tap driver (center))= spread the (X Y) pair
+   into two arguments -> wrong-number-of-arguments.  Fix: pass the
+   pair as ONE list argument.
+
+* Review queue (risk-tiered, highest first)
+
+** TODO P0 — secrets surface (eservo-session.el)
+- 0600/0700 file modes actually applied on your filesystems (the ERT
+  pins the ELisp-level =set-file-modes= call; modes are no-ops on some
+  Android filesystems — decide if that needs a warning).
+- =eservo-credentials=: auth-source only, never printed.  Check no
+  future command starts echoing it (grep =credentials= before any new
+  feature).
+- The session JSON shape: cookies array straight from
+  Network.getAllCookies; confirm nothing else sneaks into the file.
+
+** TODO P0 — the hand-rolled WebSocket client (eservo-ws.el)
+- RFC 6455 subset correctness: handshake (Sec-WebSocket-Accept),
+  client masking, frame parsing incl. fragmented frames and
+  close handling.  8 ERT tests cover framing round-trips offline, but
+  a second pair of eyes on =eservo-ws--read-frames= is the single
+  highest-value review in this repo (it talks to localhost CDP only —
+  still, protocol bugs = wrong pages clicked).
+- Payload sizes: it handles 16-bit extended lengths; 64-bit lengths
+  error rather than misparse — confirm you are fine with that bound.
+
+** TODO P1 — process lifecycle (eservo-cdp.el)
+- Zombie chromium on error paths: =eservo-stop= and the sentinel clean
+  up, but a hard Emacs kill leaves the browser running.  The profile
+  is disposable (state dir), so worst case is a stale process, not
+  data loss — still worth a look at =eservo-cdp--find-program= /
+  launch timeouts.
+- =eservo-cdp--http-json= does a plain HTTP GET to
+  =127.0.0.1:PORT/json= — fine for a locally-launched browser;
+  note it if you ever attach to a remote browser.
+
+** TODO P1 — adb honesty (eservo-adb.el)
+- The LIMITS block in the Commentary is the contract: no DOM, no
+  cookies, text= selectors only, IME-level typing.  Verify the clear
+  errors really fire through dispatch (pinned by
+  =eservo-adb-unsupported-ops-fail-clearly=).
+- =input text= escaping: spaces -> =%s=, quotes cannot be typed
+  reliably — documented; scripts that need quotes should use the cdp
+  backend.
+
+** TODO P2 — script runner (eservo-script.el)
+- No sandboxing: scripts run as your user.  The Commentary and README
+  both disclose it.  If you ever share scripts, this is the line to
+  hold.
+- =write= step writes the last =extract=; check the temp-file hygiene
+  (=with-temp-file=) is enough for your threat model.
+
+** TODO P2 — packaging
+- Main file header (Version 0.1, Package-Requires emacs 27.1) is
+  MELPA-shaped; if you want it on a package archive, the multi-file
+  layout needs a proper tar or an autoloads file — say the word.
+
+* What I could NOT verify here (honesty section)
+
+- No Android device and no Chromium binary in this sandbox: the cdp
+  and adb backends are verified by stubbed ERT tests only, never
+  against a real browser/device.  First live run on your machine is
+  the real G3.  Suggested smoke: =M-x eservo-start= -> =eservo-goto
+  https://example.org= -> =eservo-snapshot=.
+- Termux specifics (android-tools adb path, storage permissions) are
+  documented from the adb manual, not tested on-device.

@@ -1,0 +1,34 @@
+# qwen-ask.org — everyday example: ask chat.qwen.ai a question, save
+# the answer.  Deterministic: no AI picks steps, YOU wrote them.
+#
+# First time only: M-x eservo-session-login RET chat.qwen.ai, log in
+# like a human, then M-x eservo-session-save RET chat.qwen.ai.
+# After that this script never sees a login page.
+#
+# Run:  M-x eservo-script-run RET <this file>
+#       (or: emacs --batch -l eservo-script.el --eval
+#        '(eservo-script-run "qwen-ask.org")' from the repo root)
+
+* Ask qwen one question
+
+- (session-load "chat.qwen.ai")
+- (goto "https://chat.qwen.ai")
+- (wait 3)
+- (fill "textarea" "Explain WebSocket masking in two sentences.")
+- (keys "RET")
+- (wait 8)
+- (extract ".markdown")
+- (write "~/notes/qwen-answer.md")
+
+* Variants
+
+# fill-secret pulls the password from auth-source at RUN time; the
+# secret never appears in this file.  Only needed on login pages you
+# have not saved a session for yet:
+# - (fill-secret "input[name=password]" "chat.qwen.ai")
+#
+# Selector note: the cdp backend takes CSS selectors ("textarea");
+# the adb backend takes "text=..." pseudo-selectors (see README).
+#
+# Stop the browser at the end when running unattended:
+# - (stop)

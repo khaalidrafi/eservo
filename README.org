@@ -1,0 +1,152 @@
+#+TITLE: eservo — Emacs-driven web automation
+#+STARTUP: showall
+
+eservo drives a web browser from Emacs.  Point it at Chromium/Chrome
+on Linux (including =emacs -nw= on a TTY) or at an Android device
+browser over adb, then:
+
+- use small interactive commands (=M-x eservo-goto=, =eservo-snapshot=,
+  =eservo-click=, ...),
+- run *deterministic task scripts* with **zero AI** in the loop
+  (=M-x eservo-script-run=), or
+- hand the tool menu to an LLM agent: =M-x eservo-agent-brief= prints
+  every command plus the live page snapshot, ready to paste into any
+  web/cloud chat — the Emacs-native answer to browser-use / cua-driver.
+
+It is pure Elisp + external child processes.  No xwidgets, no GUI
+libraries, no package dependencies beyond Emacs 27.1 — so the same
+commands run on a Linux desktop, from a TTY, and on Android/Termux.
+
+* Install
+
+Put the repo on your =load-path= and:
+
+#+begin_src emacs-lisp
+(require 'eservo)          ; core commands + backend registry
+(require 'eservo-session)  ; per-site login persistence (optional)
+(require 'eservo-script)   ; deterministic scripts (optional)
+#+end_src
+
+Or with =use-package= / =:vc= to your taste.  Everything else
+(=eservo-cdp.el=, =eservo-adb.el=) loads on demand when you pick a
+backend.
+
+Requirements: Emacs 27.1+, and for the default backend a
+Chromium/Chrome binary.  For Android: =adb= (Termux:
+=pkg install android-tools=).
+
+* Backends
+
+** cdp (default) — Chromium/Chrome DevTools Protocol
+
+Drives a real Chromium/Chrome over its DevTools Protocol: a tiny
+pure-Elisp WebSocket client (=eservo-ws.el=) talks to
+=--remote-debugging-port= directly — no Node, no Selenium.
+
+#+begin_src emacs-lisp
+(setq eservo-cdp-program "chromium") ; default: first of chromium/chrome
+(setq eservo-cdp-headless t)         ; nil to see the browser
+#+end_src
+
+=eservo-goto / snapshot / fill / click / keys / wait / extract /
+screenshot= all work; the snapshot is a compact DOM outline with =[N]=
+refs that humans and agents both read.  The browser runs with a
+persistent profile under =eservo-state-dir=, so ordinary logins
+survive restarts by themselves.
+
+** adb — Android device browser (best effort)
+
+=M-x eservo-start C-u RET adb= (or =(setq eservo-backend 'adb)=).
+Opens URLs in the device browser, taps and types via =input tap= /
+=input text=, reads the screen through =uiautomator dump= — a
+uiautomator-based =[N]= ref snapshot, =input keyevent= keys, and
+=screencap= screenshots.  Pick a device with =eservo-adb-args=
+=("(\"-s\" \"SERIAL\")")=.
+
+Honest limits (also in =eservo-adb.el= Commentary): there is no DOM on
+this path, so =extract=, =evaluate=, cookie/session ops and CSS
+selector waits are unsupported (clear errors, not silent wrong
+behaviour); =fill= only accepts ="text=..."= selectors; typing is
+IME-level, not React-safe; and Chromium web content often shows up as
+one big WebView node — for real site automation prefer the cdp
+backend.  Raw =(tap (X Y))= coordinates exist exactly for that case.
+
+* Logging in once per site (chat.qwen.ai, z.ai, ...)
+
+The intended workflow — log in once, keep the session forever:
+
+1. =M-x eservo-session-login RET chat.qwen.ai=
+   opens a *headed* browser at the site.
+2. Log in like a human (password manager, 2FA, whatever).
+3. =M-x eservo-session-save RET chat.qwen.ai=
+   writes cookies + localStorage/sessionStorage to a 0600 file under
+   =eservo-state-dir=/sessions/= (0700 dir; never inside the repo,
+   never echoed).
+
+From then on =(session-load "chat.qwen.ai")= in a script — or
+=M-x eservo-session-load= — restores everything before you work.
+Human credentials for *scripted form-filling* come from =auth-source=
+only (=M-x eservo-credentials= reads =machine chat.qwen.ai login ...
+password ...= entries from =~/.authinfo.gpg=); eservo never prints,
+stores or logs them.
+
+* Task scripting WITHOUT AI
+
+=M-x eservo-script-run RET ~/tasks/qwen-ask.org= runs a file of steps
+deterministically — the same primitives the interactive commands use,
+in the same order, every time.  One sexp list:
+
+#+begin_src emacs-lisp
+((session-load "chat.qwen.ai")
+ (goto "https://chat.qwen.ai")
+ (fill "textarea" "Summarize this: ...")
+ (keys "RET")
+ (wait 6)
+ (extract ".answer")
+ (write "~/notes/qwen-out.txt"))
+#+end_src
+
+or the same steps one-per-line in an Org file (headings, bullets and
+comments are skipped).  Steps: =goto wait sleep fill fill-secret
+click keys extract screenshot session-load write echo stop=.
+=(fill-secret SELECTOR SITE)= pulls the password from =auth-source=
+at run time — secrets never appear in script files, step logs or the
+echo area.  Results come back as an =(OP . RESULT)= alist for Elisp
+callers.
+
+See =eservo-scripts/= for runnable examples.
+
+* Agents (the agentic-driving lane)
+
+=M-x eservo-agent-brief= prints the full tool menu with exact command
+names followed by the live snapshot (and copies it to the kill-ring).
+Paste that into any web/cloud model you are prompting; it now knows
+the vocabulary, sees the page, and answers with the next command to
+run.  This makes *the model you are already chatting with* the driving
+brain — no second model, no extra service, no browser-use
+installation; the snapshot/refs vocabulary is small enough for any
+competent LLM.
+
+* Security notes
+
+- Session files ARE credentials (cookies, storage tokens): 0600 files
+  in a 0700 dir under =eservo-state-dir=.  Never commit them.
+- Human credentials: =auth-source= only; eservo never writes them.
+- Scripts run as your Emacs user with your credentials and are NOT
+  sandboxed — only run scripts you have read (=eservo-script.el=
+  Commentary says the same).
+- The CDP port binds to localhost for the launched browser; still,
+  treat a live debugging port as sensitive and stop the browser when
+  done (=eservo-stop=).
+
+* Development
+
+#+begin_example
+make compile   # byte-compile, warnings are errors
+make test      # 55 ERT tests, all offline (stub backends)
+#+end_example
+
+=tests/run.el= loads every =tests/test-*.el=.  No test needs a
+browser, a device or a network connection.
+
+License: GPL-3.0-or-later (see file headers).
