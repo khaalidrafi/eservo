@@ -66,6 +66,17 @@
          (steps (eservo-script--parse file)))
     (should (equal steps '((goto "https://a.example") (wait 1))))))
 
+(ert-deftest eservo-script-sexp-with-el-header-comments ()
+  "A .el-style header (`;' lines, blanks) must not push a multi-line
+sexp script into the line-by-line Org parser (unbalanced-paren bug)."
+  (let* ((file (eservo-test--temp-file
+                ";;; smoke.el --- example\n\n;; Run: M-x eservo-script-run\n\n((goto \"https://a.example\")\n (wait 2)\n (stop))\n"
+                ".el"))
+         (steps (eservo-script--parse file)))
+    (should (equal steps '((goto "https://a.example")
+                           (wait 2)
+                           (stop))))))
+
 (ert-deftest eservo-script-parses-org-one-step-per-line ()
   "Org files: skip headings/comments, one sexp step per line."
   (let* ((file (eservo-test--temp-file

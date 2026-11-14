@@ -52,6 +52,15 @@ bullets and comments."
   (with-temp-buffer
     (insert-file-contents file)
     (goto-char (point-min))
+    ;; A .el-style script opens with `;' header comments; skip those
+    ;; (and blank lines) before deciding which flavour this file is,
+    ;; so a commented header does not push a sexp script into the
+    ;; line-by-line Org parser (where its multi-line sexp would hit
+    ;; an unbalanced-paren read error).
+    (while (and (not (eobp))
+                (or (looking-at "[ \t]*$")  ; blank line
+                    (looking-at "[ \t]*;"))) ; comment line
+      (forward-line 1))
     (if (looking-at "[ \t\n\r]*(")
         ;; ---- sexp form ----
         (let ((forms '()))
