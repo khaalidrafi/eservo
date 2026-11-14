@@ -392,7 +392,7 @@ argument -- the repo's `apply' bug class -- cannot pass unnoticed."
                    (equal started
                           (list
                            (cons "org.servo.servoshell/org.servo.servoshell.MainActivity"
-                                 `((servoargs . ,(format "--devtools=%d" port)))))))
+                                 '(("servoargs" . ,(format "--devtools=%d" port)))))))
                   (should (and eservo--current-driver
                                (eservo-backend-call eservo--current-driver
                                                     'alive-p))))
@@ -430,12 +430,12 @@ argument -- the repo's `apply' bug class -- cannot pass unnoticed."
                           (should (and eservo--current-driver
                                        (eservo-backend-call
                                         eservo--current-driver 'alive-p))))
-                      (eservo-stop)))))
+                      (eservo-stop))))))
             (should (equal calls
                            (list (list "shell" "am" "start" "-n"
                                        "org.servo.servoshell/org.servo.servoshell.MainActivity"
                                        "--es" "servoargs"
-                                       (format "--devtools=%d" port)))))))))))))
+                                       (format "--devtools=%d" port))))))))))))
 
 (ert-deftest eservo-servo-android-start-prefix-arg-prefers-adb ()
   "C-u picks the adb lane even when the patched primitive exists."
@@ -454,13 +454,13 @@ argument -- the repo's `apply' bug class -- cannot pass unnoticed."
                   (lambda ()
                     (unwind-protect
                         (eservo-servo-android-start '(4))
-                      (eservo-stop)))))
+                      (eservo-stop))))))
             (should (equal primitive-calls 0))
             (should (equal calls
                            (list (list "shell" "am" "start" "-n"
                                        "org.servo.servoshell/org.servo.servoshell.MainActivity"
                                        "--es" "servoargs"
-                                       (format "--devtools=%d" port)))))))))))))
+                                       (format "--devtools=%d" port))))))))))))
 
 (ert-deftest eservo-servo-android-start-no-lane-errors-clearly ()
   "No primitive and no adb: a clear error naming the spec and the lane."

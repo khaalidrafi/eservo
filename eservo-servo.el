@@ -232,7 +232,8 @@ never silently overridden."
          (activity (format "%s/%s"
                            eservo-servo-android-package
                            eservo-servo-android-activity))
-         (extras `((servoargs . ,(format "--devtools=%d" port)))))
+         (extras (list (cons "servoargs"
+                              (format "--devtools=%d" port)))))
     (funcall (if (or via-adb
                      (and (not (fboundp 'android-start-activity))
                           (executable-find "adb")
