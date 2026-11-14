@@ -13,20 +13,30 @@
 ;; extract, evaluate -- is executed as JavaScript in the live page
 ;; through the console actor's evaluateJS.
 ;;
-;; Two ways up:
+;; Three ways up:
+;;
+;; - ANDROID (native on-device): Emacs and the servo app on ONE phone,
+;;   no PC, no remote host.  `eservo-servo-android-start' starts the
+;;   servo app (org.servo.servoshell, the servo.org nightly APK) with
+;;   the servoargs intent extra "--devtools=PORT" and attaches on
+;;   127.0.0.1 -- the attach path, just over loopback.  The app is
+;;   started through the `eservo-servo-android-start-function' seam:
+;;   the patched-Emacs primitive `android-start-activity' by default
+;;   (stock Emacs Android does not have it), or `adb shell am start'
+;;   with a prefix arg / automatically when the primitive is missing
+;;   and adb is on PATH.
 ;;
 ;; - LAUNCH (desktop Linux): `eservo-servo-port' nil (default) starts
 ;;   `servoshell' (or `servo') from PATH with an ephemeral devtools
 ;;   port and about:blank, then attaches.
 ;;
-;; - ATTACH (Android/Termux, remote, or shared): set `eservo-servo-port'
-;;   (and `eservo-servo-host' when not on this machine) to a servo
-;;   already running with --devtools.  From Termux Emacs this is how a
-;;   servo on the same device -- or on a desktop over the LAN -- becomes
-;;   the embedded engine for Emacs.  The servo Android app
-;;   (org.servo.servoshell, servo.org nightlies) can also be driven at
-;;   the UI level with the adb backend: set
-;;   `eservo-adb-browser-package' to "org.servo.servoshell".
+;; - ATTACH (desktop/LAN): set `eservo-servo-port' (and
+;;   `eservo-servo-host' when the servo is another machine) to a servo
+;;   already running with --devtools.  This is the desktop
+;;   shared-servo story; on Android the native lane above is the
+;;   answer.  The servo Android app can also be driven at the UI level
+;;   with the adb backend: set `eservo-adb-browser-package' to
+;;   "org.servo.servoshell".
 ;;
 ;; HONEST LIMITS of the devtools subset Servo implements today:
 ;; - No screenshot and no cookie access over RDP: those ops are nil
@@ -43,6 +53,20 @@
 (require 'cl-lib)
 (require 'eservo-backend)
 (require 'eservo-rdp)
+
+;; Declared, not required: the Android lane below calls back into the
+;; command layer only when actually used, so this backend file stays
+;; loadable without it (eservo.el requires eservo-backend, which loads
+;; this file on demand -- a top-level require back would risk a cycle
+;; the day eservo.el eagerly requires its backends).
+(declare-function eservo-start "eservo" (&optional backend))
+;; The patched-Emacs Android primitive the default start seam calls.
+;; Stock Emacs Android (org.gnu.emacs) does not define it; every call
+;; is guarded by `fboundp'.  The FILE argument is byte-compile
+;; metadata only (see `declare-function'); "ext:" marks it as living
+;; in the patched build, outside this repo.
+(declare-function android-start-activity "ext:android"
+                  (activity &optional extras-alist))
 
 (defgroup eservo-servo nil
   "Servo engine backend for eservo."
@@ -70,6 +94,33 @@ Point at a desktop machine to drive its servo from Android/Termux."
   "Extra command-line args for the launched servo (desktop only)."
   :group 'eservo-servo
   :type '(repeat string))
+
+(defcustom eservo-servo-android-package "org.servo.servoshell"
+  "Android package of the servo app the on-device lane starts.
+Matches the servo.org nightly APK (built from support/android/apk in
+the servo source tree)."
+  :group 'eservo-servo
+  :type 'string)
+
+(defcustom eservo-servo-android-activity "org.servo.servoshell.MainActivity"
+  "Launcher activity started inside `eservo-servo-android-package'."
+  :group 'eservo-servo
+  :type 'string)
+
+(defcustom eservo-servo-android-start-function
+  #'eservo-servo-android--start-via-emacs
+  "Seam that starts the servo Android app: (FN ACTIVITY EXTRAS).
+ACTIVITY is the \"PACKAGE/ACTIVITY\" component string; EXTRAS is an
+alist of (KEY . VALUE) string pairs handed to the app as intent
+extras.  The default `eservo-servo-android--start-via-emacs' uses the
+patched-Emacs primitive
+  (android-start-activity ACTIVITY &optional EXTRAS-ALIST)
+where EXTRAS-ALIST is that same alist of string pairs; stock Emacs
+Android does not define the primitive.  Set this to
+`eservo-servo-android--start-via-adb' to always start over
+`adb shell am start' instead."
+  :group 'eservo-servo
+  :type 'function)
 
 (defcustom eservo-servo-max-elements 250
   "Maximum number of elements listed in one snapshot outline."
@@ -116,6 +167,87 @@ Point at a desktop machine to drive its servo from Android/Termux."
 
 (defun eservo-servo--console (driver)
   (plist-get (eservo--driver-opts driver) :console))
+
+;; ----- Android: the on-device lane ------------------------------------
+
+(defun eservo-servo-android--start-via-emacs (activity extras)
+  "Start the servo app ACTIVITY with EXTRAS through patched Emacs.
+This is the default `eservo-servo-android-start-function' seam.  It
+needs the patched-Emacs primitive
+  (android-start-activity ACTIVITY &optional EXTRAS-ALIST)
+(EXTRAS-ALIST is an alist of string pairs mapped to intent extras).
+Stock Emacs Android does not define it, so this signals a clear
+error pointing at the adb lane instead of failing obscurely."
+  (unless (fboundp 'android-start-activity)
+    (error "eservo-servo: no `android-start-activity' in this Emacs (patched-Emacs spec: (android-start-activity ACTIVITY &optional EXTRAS-ALIST)); use the adb lane: C-u M-x eservo-servo-android-start (needs adb in PATH; Termux: pkg install android-tools)"))
+  (android-start-activity activity extras)
+  t)
+
+(defun eservo-servo-android--start-via-adb (activity extras)
+  "Start the servo app ACTIVITY with EXTRAS over `adb shell am start'.
+Each (KEY . VALUE) pair of EXTRAS becomes one `--es KEY VALUE'
+intent extra.  Needs adb on PATH (Termux: `pkg install
+android-tools', then pair/connect wireless debugging so adb can
+reach the phone itself); signals a clear error otherwise."
+  (let ((adb (executable-find "adb")))
+    (unless adb
+      (error "eservo-servo: adb not found in PATH (Termux: pkg install android-tools; desktop: install adb)"))
+    (let (;; (KEY . VALUE) pairs flattened to --es KEY VALUE, in order.
+          ;; mapcan over freshly consed lists, never `apply' spreading:
+          ;; an extra's VALUE must stay ONE argument (repo bug-class
+          ;; law -- `apply' once spread a pair meant as one arg).
+          (args (append
+                 (list "shell" "am" "start" "-n" activity)
+                 (mapcan (lambda (pair)
+                           (list "--es" (car pair) (cdr pair)))
+                         extras)))
+          (buf (generate-new-buffer " *eservo-servo-adb*")))
+      (unwind-protect
+          (progn
+            ;; Spreading ARGS here is intended: it IS the argv list.
+            (unless (zerop (apply #'call-process adb nil buf nil args))
+              (error "eservo-servo: `adb shell am start' failed: %s"
+                     (string-trim (buffer-string))))
+            t)
+        (kill-buffer buf)))))
+
+(defun eservo-servo-android-start (&optional via-adb)
+  "Start the servo Android app on this device, then attach to it.
+The on-device answer: Emacs and the servo app share one phone, no
+PC, no remote host.  Computes the devtools port (`eservo-servo-port'
+when set, else an ephemeral free port), starts
+`eservo-servo-android-activity' in `eservo-servo-android-package'
+with the intent extra servoargs \"--devtools=PORT\", then attaches
+the servo backend on 127.0.0.1:PORT through the ordinary attach
+path -- the app's devtools server is simply the local servo.
+
+The app is started through `eservo-servo-android-start-function'.
+With \\[universal-argument] (VIA-ADB non-nil), or automatically
+when this Emacs lacks `android-start-activity' while adb is on
+PATH, the adb lane is preferred instead; a customized seam is
+never silently overridden."
+  (interactive "P")
+  (require 'eservo)
+  (let* ((port (or eservo-servo-port (eservo-servo--free-port)))
+         (activity (format "%s/%s"
+                           eservo-servo-android-package
+                           eservo-servo-android-activity))
+         (extras `((servoargs . ,(format "--devtools=%d" port)))))
+    (funcall (if (or via-adb
+                     (and (not (fboundp 'android-start-activity))
+                          (executable-find "adb")
+                          ;; Auto-fallback only from the default seam:
+                          ;; a custom start function is the user's call.
+                          (eq eservo-servo-android-start-function
+                              #'eservo-servo-android--start-via-emacs)))
+                 #'eservo-servo-android--start-via-adb
+               eservo-servo-android-start-function)
+             activity extras)
+    ;; Attach exactly like attach mode: loopback host + this port, then
+    ;; the ordinary eservo-start wiring (driver, global, live guard).
+    (let ((eservo-servo-host "127.0.0.1")
+          (eservo-servo-port port))
+      (eservo-start 'servo))))
 
 ;; ----- evaluateJS: the one op everything else is built on -------------
 

@@ -158,3 +158,41 @@ tests; they are classic Elisp traps, so the fixes carry comments:
 - The servo Android app's package name (org.servo.servoshell) is
   from the Servo Book build docs; verify against the installed APK
   before relying on the adb+servo combo.
+** DONE Android native on-device lane (added 2026-11-15)
+   Owner order: eservo must drive a servo running ON THE SAME PHONE —
+   no PC, no remote host.  Port Engineer unit, Lead-reviewed.
+   What landed (eservo-servo.el, tests/test-servo.el, README.org):
+   - `eservo-servo-android-start' starts the servo app
+     (org.servo.servoshell, servo.org nightly APK) with the
+     servoargs intent extra "--devtools=PORT" and attaches on
+     127.0.0.1 — loopback attach, everything on one device.
+   - Start seam `eservo-servo-android-start-function': default
+     `--start-via-emacs' calls the patched-Emacs primitive
+     (android-start-activity ACTIVITY &optional EXTRAS-ALIST) —
+     STOCK Emacs Android does not define it (verified against
+     upstream master); `--start-via-adb' runs `adb shell am start
+     -n PKG/ACTIVITY --es servoargs ...' (C-u forces it; picked
+     automatically only when the primitive is missing AND adb is on
+     PATH AND the seam is still the default).  The old wiki's
+     /sdcard/servo/android_params mechanism is GONE from current
+     servo source — deliberately not documented.
+   - Five offline ERT tests: emacs lane (seam args + loopback
+     attach proven against the fake RDP server with a poisoned
+     non-loopback host), adb argv shape (captured as a LIST — the
+     repo's apply-spread bug class cannot pass unnoticed), no-
+     primitive auto-fallback, C-u preference, and the clear-error
+     lane.  Void function cell handled with an explicit
+     fbind/fmakunbound dance (cl-letf cannot save a void cell).
+   Lead review (this commit): three unbalanced-paren repairs in the
+   new test forms (binding-list close on the adb-argv test; final
+   closes on the auto-fallback and C-u tests) — found by a
+   string/comment-aware depth scan, file now balances to 0.  No
+   logic changes; the argv assertions were re-read line by line.
+   GATES: no emacs binary in this sandbox — CI on GitHub is the
+   gate (`make compile` warnings-as-errors + `make test`).  Check
+   the run after push.
+   SPEC DEPENDENCY (open): the patched-Emacs primitive
+   android-start-activity is designed but not built; the adb lane
+   is the working start path until that APK exists.  Same patch
+   series carries the usage-stats primitive (org-activity native
+   unit).

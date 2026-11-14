@@ -2,8 +2,9 @@
 #+STARTUP: showall
 
 eservo drives a web browser from Emacs.  Point it at Chromium/Chrome
-on Linux (including =emacs -nw= on a TTY) or at an Android device
-browser over adb, then:
+on Linux (including =emacs -nw= on a TTY), at the Servo engine —
+natively on the same Android phone, or on desktop Linux — or at an
+Android device browser over adb, then:
 
 - use small interactive commands (=M-x eservo-goto=, =eservo-snapshot=,
   =eservo-click=, ...),
@@ -28,12 +29,13 @@ Put the repo on your =load-path= and:
 #+end_src
 
 Or with =use-package= / =:vc= to your taste.  Everything else
-(=eservo-cdp.el=, =eservo-adb.el=) loads on demand when you pick a
-backend.
+(=eservo-cdp.el=, =eservo-servo.el=, =eservo-adb.el=) loads on
+demand when you pick a backend.
 
 Requirements: Emacs 27.1+, and for the default backend a
-Chromium/Chrome binary.  For Android: =adb= (Termux:
-=pkg install android-tools=).
+Chromium/Chrome binary.  For Android: the servo nightly APK for the
+on-device servo lane (below), and =adb= (Termux: =pkg install
+android-tools=) for the adb backend and the servo adb fallback lane.
 
 * Backends
 
@@ -64,17 +66,34 @@ server — the same Firefox Remote Debugging Protocol Firefox's
 client (=eservo-rdp.el=): =length:JSON= TCP framing, no
 dependencies.
 
-Two ways up:
+Three ways up:
 
+- *Android (native on-device)*: Emacs and the servo app share ONE
+  phone — no PC, no remote host.  Install the servo nightly APK from
+  https://servo.org/download, =(require 'eservo-servo)=, then =M-x
+  eservo-servo-android-start=: eservo starts the servo app
+  (=org.servo.servoshell=) with the =servoargs= intent extra
+  =--devtools=PORT= and attaches on =127.0.0.1= automatically — the
+  app's devtools server is simply the local servo.  The app is
+  started through a seam (=eservo-servo-android-start-function=):
+  the patched-Emacs primitive =android-start-activity= by default
+  (stock Emacs Android does not have it), or the adb lane — =C-u M-x
+  eservo-servo-android-start= forces it, and it is picked
+  automatically when the primitive is missing and =adb= is on PATH
+  (Termux: =pkg install android-tools=, then pair/connect wireless
+  debugging so adb can reach the phone itself).  The adb lane is
+  exactly =adb shell am start -n= with the component
+  =org.servo.servoshell/org.servo.servoshell.MainActivity= and the
+  =--es servoargs "--devtools=PORT"= extra.
 - *Launch* (desktop Linux): leave =eservo-servo-port= nil; eservo
   starts =servoshell= (or =servo=) from PATH with an ephemeral
   =--devtools=PORT= and attaches.  Get servo from
   https://servo.org/download (nightly tarballs).
-- *Attach* (Android/Termux, remote, or sharing one servo): set
-  =eservo-servo-port= (and =eservo-servo-host= when the server is
+- *Attach to a remote servo* (desktop/LAN — NOT the Android answer):
+  set =eservo-servo-port= (and =eservo-servo-host= when the server is
   another machine) to a servo already running with =--devtools=.
-  From Termux Emacs this makes a servo on the same device — or on a
-  desktop over the LAN — the engine Emacs drives.
+  This is the desktop shared-servo story; on the phone itself, use
+  the native lane above.
 
 Ops (goto, snapshot with =[N]= refs, React-safe fill, click, keys,
 wait, extract, evaluate) run as JavaScript in the live page via the
@@ -95,8 +114,13 @@ What is adb FOR?  It is the bridge for the device you actually hold:
 it drives the real on-device browser (including the servo app
 itself — set =eservo-adb-browser-package= ="org.servo.servoshell"=)
 over USB/wireless debugging from desktop Emacs, and from Termux
-via =pkg install android-tools=.  When you need the DOM-level
-control of the servo backend instead, use attach mode above.
+via =pkg install android-tools=.  It is also the automation bridge
+for on-device servo when the patched-Emacs =android-start-activity=
+primitive is absent: =C-u M-x eservo-servo-android-start= starts
+the servo app over =adb shell am start= and attaches the servo
+backend on =127.0.0.1= (servo section above).  When you need
+DOM-level control of a servo instead, the servo section is the
+answer — native on Android, attach on desktop/LAN.
 
 =M-x eservo-start C-u RET adb= (or =(setq eservo-backend 'adb)=).
 Opens URLs in the device browser, taps and types via =input tap= /
@@ -185,7 +209,7 @@ competent LLM.
 
 #+begin_example
 make compile   # byte-compile, warnings are errors
-make test      # 55 ERT tests, all offline (stub backends)
+make test      # 74 ERT tests, all offline (stub backends)
 #+end_example
 
 =tests/run.el= loads every =tests/test-*.el=.  No test needs a

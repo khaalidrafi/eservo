@@ -12,12 +12,22 @@
 ;; tabListChanged notification (to prove reply matching is race-safe),
 ;; listTabs with a consoleActor, evaluateJS replies with result /
 ;; exceptionMessage.
+;;
+;; The Android on-device start lanes are covered the same way: adb
+;; and the patched-Emacs `android-start-activity' primitive are
+;; stubbed (the primitive with an explicit fbind/fmakunbound dance,
+;; because `cl-letf' cannot even SAVE a void function cell), and the
+;; attach lands on the fake RDP server like every other test.
 
 ;;; Code:
 
 (require 'ert)
 (require 'cl-lib)
 (require 'eservo-servo)
+;; The android start lanes attach through `eservo-start', which also
+;; owns `eservo--current-driver' (a defvar: binding it dynamically in
+;; the tests below only works once eservo.el is loaded).
+(require 'eservo)
 
 ;; ------------------------------------------------------------------------
 ;; Framing unit tests (no process involved)
@@ -313,6 +323,156 @@ backend ops send, so the op plumbing is tested end to end."
 
 (ert-deftest eservo-servo-backend-registered ()
   (should (assq 'servo (eservo-backend-registered))))
+
+;; ------------------------------------------------------------------------
+;; Android on-device start lanes (offline: adb, the patched-Emacs
+;; primitive and the app itself are all stubbed; the attach goes to
+;; the same fake RDP server as the rest of this suite)
+;; ------------------------------------------------------------------------
+
+(defun eservo-servo-test--with-primitive (stub body-fn)
+  "Call BODY-FN with `android-start-activity' in a controlled state.
+STUB non-nil fbinds the primitive to it (the patched-Emacs lane);
+STUB nil fmakunbounds it (stock Emacs has no such primitive).  The
+previous state of the function cell -- usually void -- is restored
+afterwards.  Plain `cl-letf' cannot do this: its place getter for
+`(symbol-function X)' signals void-function when X is void, so the
+save/restore dance lives here."
+  (let ((was (fboundp 'android-start-activity))
+        (old (and (fboundp 'android-start-activity)
+                  (symbol-function 'android-start-activity))))
+    (unwind-protect
+        (progn
+          (if stub
+              (defalias 'android-start-activity stub)
+            (fmakunbound 'android-start-activity))
+          (funcall body-fn))
+      (if was
+          (defalias 'android-start-activity old)
+        (fmakunbound 'android-start-activity)))))
+
+(defun eservo-servo-test--with-adb-stub (body-fn)
+  "Call BODY-FN with adb on PATH and `call-process' faked.
+Return the recorded call-process argv lists (the part after PROGRAM
+INFILE BUFFER DISPLAY), newest first; every call exits 0.  The argv
+is captured as a LIST (not one shell string) so a wrongly-spread
+argument -- the repo's `apply' bug class -- cannot pass unnoticed."
+  (let (calls)
+    (cl-letf (((symbol-function 'executable-find)
+               ;; `executable-find' takes (NAME &optional REMOTE).
+               (lambda (name &optional _remote)
+                 (when (string= name "adb") "/fake/bin/adb")))
+              ((symbol-function 'call-process)
+               (lambda (_program _infile _buffer _display &rest args)
+                 (push args calls)
+                 0)))
+      (funcall body-fn))
+    calls))
+
+(ert-deftest eservo-servo-android-start-emacs-lane ()
+  "Seam gets PKG/ACTIVITY + the servoargs extra; attach is loopback."
+  (eservo-servo-test--with-fake
+   (lambda (port)
+     (let ((eservo--current-driver nil)
+           (eservo-servo-port port)
+           ;; a non-loopback host must be ignored: the on-device
+           ;; attach is always 127.0.0.1
+           (eservo-servo-host "192.0.2.1")
+           (started nil))
+       (eservo-servo-test--with-primitive
+        (lambda (&rest _) t)
+        (lambda ()
+          (let ((eservo-servo-android-start-function
+                 (lambda (activity extras)
+                   (push (cons activity extras) started))))
+            (unwind-protect
+                (progn
+                  (eservo-servo-android-start)
+                  (should
+                   (equal started
+                          (list
+                           (cons "org.servo.servoshell/org.servo.servoshell.MainActivity"
+                                 `((servoargs . ,(format "--devtools=%d" port)))))))
+                  (should (and eservo--current-driver
+                               (eservo-backend-call eservo--current-driver
+                                                    'alive-p))))
+              (eservo-stop)))))))))
+
+(ert-deftest eservo-servo-android-adb-start-via-adb-am-command ()
+  "The adb lane runs am start -n PKG/ACTIVITY with --es extras."
+  (let ((calls
+         (eservo-servo-test--with-adb-stub
+          (lambda ()
+            (should (eq (eservo-servo-android--start-via-adb
+                         "org.servo.servoshell/org.servo.servoshell.MainActivity"
+                         '((servoargs . "--devtools=6080")))
+                        t))))))
+    (should (equal calls
+                   (list (list "shell" "am" "start" "-n"
+                               "org.servo.servoshell/org.servo.servoshell.MainActivity"
+                               "--es" "servoargs" "--devtools=6080"))))))
+
+(ert-deftest eservo-servo-android-start-adb-lane-when-no-primitive ()
+  "Stock Emacs (no primitive) + adb on PATH: the adb lane starts the app."
+  (eservo-servo-test--with-fake
+   (lambda (port)
+     (let ((eservo--current-driver nil)
+           (eservo-servo-port port))
+       (eservo-servo-test--with-primitive
+        nil
+        (lambda ()
+          (let ((calls
+                 (eservo-servo-test--with-adb-stub
+                  (lambda ()
+                    (unwind-protect
+                        (progn
+                          (eservo-servo-android-start)
+                          (should (and eservo--current-driver
+                                       (eservo-backend-call
+                                        eservo--current-driver 'alive-p))))
+                      (eservo-stop)))))
+            (should (equal calls
+                           (list (list "shell" "am" "start" "-n"
+                                       "org.servo.servoshell/org.servo.servoshell.MainActivity"
+                                       "--es" "servoargs"
+                                       (format "--devtools=%d" port)))))))))))))
+
+(ert-deftest eservo-servo-android-start-prefix-arg-prefers-adb ()
+  "C-u picks the adb lane even when the patched primitive exists."
+  (eservo-servo-test--with-fake
+   (lambda (port)
+     (let ((eservo--current-driver nil)
+           (eservo-servo-port port)
+           (primitive-calls 0))
+       (eservo-servo-test--with-primitive
+        (lambda (_activity &optional _extras)
+          (cl-incf primitive-calls)
+          t)
+        (lambda ()
+          (let ((calls
+                 (eservo-servo-test--with-adb-stub
+                  (lambda ()
+                    (unwind-protect
+                        (eservo-servo-android-start '(4))
+                      (eservo-stop)))))
+            (should (equal primitive-calls 0))
+            (should (equal calls
+                           (list (list "shell" "am" "start" "-n"
+                                       "org.servo.servoshell/org.servo.servoshell.MainActivity"
+                                       "--es" "servoargs"
+                                       (format "--devtools=%d" port)))))))))))))
+
+(ert-deftest eservo-servo-android-start-no-lane-errors-clearly ()
+  "No primitive and no adb: a clear error naming the spec and the lane."
+  (cl-letf (((symbol-function 'executable-find)
+             (lambda (_name &optional _remote) nil)))
+    (eservo-servo-test--with-primitive
+     nil
+     (lambda ()
+       (let ((err (should-error (eservo-servo-android-start))))
+         (should (string-match-p "android-start-activity"
+                                 (error-message-string err)))
+         (should (string-match-p "adb" (error-message-string err))))))))
 
 (provide 'test-servo)
 ;;; test-servo.el ends here
