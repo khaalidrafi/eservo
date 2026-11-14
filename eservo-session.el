@@ -148,6 +148,8 @@ Returns the saved origin."
       (eservo-backend-call driver 'evaluate
                            (format "(function(){var d=JSON.parse(%s);for(var k in d.local){localStorage.setItem(k,d.local[k]);}for(var k in d.session){sessionStorage.setItem(k,d.session[k]);}return true;})()"
                                    (json-encode (json-encode storage))))
+      ;; Optional final hop (docstring promised it; landing it here).
+      (when url (eservo-backend-call driver 'goto url))
       (message "eservo: session %s restored (%d cookies)" site (length cookies))
       origin)))
 

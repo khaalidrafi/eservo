@@ -31,7 +31,7 @@ what was verified, and exactly where human eyes add the most value.
 - =make compile= -> clean, with =byte-compile-error-on-warn t= (0
   warnings across all 7 source files).
 - Test inventory: ws 8, backend 3, cdp 13, eservo 10, session 5,
-  script 8, adb 8.
+  script 9, adb 8.
 
 * Bugs found while landing the adb unit (worth re-reading)
 

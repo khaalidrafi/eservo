@@ -89,7 +89,12 @@
      (should cs)
      (should (equal (cdr (assoc 'name (car (cadr cs)))) "sid")))
    ;; storage restore was evaluated on the saved origin
-   (should (member '(goto "https://stub.example") eservo-test--calls))))
+   (should (member '(goto "https://stub.example") eservo-test--calls))
+   ;; the optional URL argument hops there AFTER the restore
+   ;; (the stub pushes newest first, so it is the head of the list)
+   (eservo-session-load "stub.example" "https://stub.example/chat")
+   (should (equal (car eservo-test--calls)
+                  '(goto "https://stub.example/chat")))))
 
 (ert-deftest eservo-session-load-missing-file-errors ()
   "Loading a site that was never saved must say so clearly."

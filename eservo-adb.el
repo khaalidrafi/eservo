@@ -250,20 +250,20 @@ Refs are remembered in the driver for `eservo-adb--click'."
   (eservo-adb--run "shell" "input" "text"
                    (replace-regexp-in-string " " "%s" text)))
 
-(defun eservo-adb--keys (driver keys)
+(defun eservo-adb--keys (_driver keys)
   "Send KEYS: known tokens via keyevent, other words via input text."
   (dolist (tok (split-string keys "[ \t\n]+" t))
     (if-let* ((code (cdr (assoc (upcase tok) eservo-adb--keycodes))))
         (eservo-adb--run "shell" "input" "keyevent" (number-to-string code))
       (eservo-adb--run "shell" "input" "text" tok))))
 
-(defun eservo-adb--wait (driver spec &optional _timeout)
+(defun eservo-adb--wait (_driver spec &optional _timeout)
   "Wait: numbers sleep; CSS selectors are impossible here."
   (if (numberp spec)
       (sit-for spec)
     (error "eservo-adb: selector waits unsupported (no DOM; use (wait N) or eservo-snapshot)")))
 
-(defun eservo-adb--screenshot (driver file)
+(defun eservo-adb--screenshot (_driver file)
   "Screencap the device screen to FILE (PNG bytes via exec-out)."
   (let ((data (eservo-adb--run-raw "exec-out" "screencap" "-p")))
     (let ((coding-system-for-write 'no-conversion))
