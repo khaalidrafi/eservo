@@ -392,7 +392,7 @@ argument -- the repo's `apply' bug class -- cannot pass unnoticed."
                    (equal started
                           (list
                            (cons "org.servo.servoshell/org.servo.servoshell.MainActivity"
-                                 '(("servoargs" . ,(format "--devtools=%d" port)))))))
+                                 `(("servoargs" . ,(format "--devtools=%d" port)))))))
                   (should (and eservo--current-driver
                                (eservo-backend-call eservo--current-driver
                                                     'alive-p))))
@@ -405,7 +405,7 @@ argument -- the repo's `apply' bug class -- cannot pass unnoticed."
           (lambda ()
             (should (eq (eservo-servo-android--start-via-adb
                          "org.servo.servoshell/org.servo.servoshell.MainActivity"
-                         '((servoargs . "--devtools=6080")))
+                         '(("servoargs" . "--devtools=6080")))
                         t))))))
     (should (equal calls
                    (list (list "shell" "am" "start" "-n"
