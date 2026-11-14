@@ -124,24 +124,32 @@ method has no entry, RESULT is ((status . \"ok\")).  Return the fake
 state as a plist: (:http HTTP-PORT :ws WS-PORT :requests LIST
 :replies REPLIES).  :requests is mutated in place (newest first), so
 tests can read it after a run."
-  (let* ((fake (list :requests nil :replies replies))
+  (let* ((fake (list :requests nil :calls nil :replies replies))
          (handler
           (lambda (conn text)
             (when text
               (let* ((msg (json-parse-string text
                                              :object-type 'alist
-                                             :array-type 'list))
+                                             :array-type 'list
+                                             :null-object nil
+                                             :false-object nil))
                      (id (cdr (assoc 'id msg)))
-                     (method (cdr (assoc 'method msg))))
-                ;; Record the request for later assertions.
+                     (method (cdr (assoc 'method msg)))
+                     (params (cdr (assoc 'params msg))))
+                ;; Record method (and params) for later assertions.
                 (plist-put fake :requests
                            (cons method (plist-get fake :requests)))
+                (plist-put fake :calls
+                           (cons (cons method params)
+                                 (plist-get fake :calls)))
                 (let ((result (or (cdr (assoc method
                                               (plist-get fake :replies)))
                                   '((status . "ok")))))
                   (eservo-test--ws-server-send
-                   conn (json-serialize `((id . ,id) (result . ,result))
-                                        :object-type 'alist)))))))
+                   ;; json-encode (not json-serialize): the C serializer
+                   ;; chokes on alists nested inside arrays (e.g. a
+                   ;; list of cookie objects) -- see AI-REVIEW.org.
+                   conn (json-encode `((id . ,id) (result . ,result)))))))))
          (ws-port (eservo-test--ws-server handler))
          (http-port (eservo-test--http-server
                      (lambda (_method path)

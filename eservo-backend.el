@@ -23,6 +23,18 @@
   "Backend abstraction for eservo browser drivers."
   :group 'eservo)
 
+(defcustom eservo-state-dir
+  (expand-file-name
+   "eservo"
+   (file-name-as-directory
+    (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+  "Directory for eservo's persistent local state (browser profile,
+saved sessions).  Never committed to git; files with credentials get
+mode 0600.  Uses XDG_STATE_HOME when set, so Termux/Android setups
+work unchanged (HOME-based fallback)."
+  :group 'eservo-backend
+  :type 'directory)
+
 (cl-defstruct (eservo-backend (:constructor eservo-backend--make))
   "One browser backend.  Every slot is a function taking the driver
 `eservo--driver' as its first argument (unless noted) plus the extra
