@@ -100,7 +100,10 @@
 
 (ert-deftest eservo-credentials-comes-from-auth-source ()
   "eservo-credentials must read from auth-source and hide nothing in logs."
-  (let* ((authfile (make-temp-file "authinfo"))
+  ;; auth-source caches search results (password-data) keyed by the
+  ;; whole spec; disable so this test's fresh temp authinfo is read.
+  (let* ((auth-source-do-cache nil)
+         (authfile (make-temp-file "authinfo"))
          (auth-sources `((:source ,authfile :format t))))
     ;; Write a classic netrc entry (plain file is enough for the test;
     ;; real users should use ~/.authinfo.gpg).
