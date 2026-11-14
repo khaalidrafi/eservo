@@ -54,7 +54,49 @@ refs that humans and agents both read.  The browser runs with a
 persistent profile under =eservo-state-dir=, so ordinary logins
 survive restarts by themselves.
 
+** servo — the Servo engine (native-engine lane)
+
+=M-x eservo-start C-u RET servo= (or =(setq eservo-backend 'servo)=).
+
+Drives a real Servo (the Rust web engine) through its devtools
+server — the same Firefox Remote Debugging Protocol Firefox's
+=about:debugging= speaks.  eservo ships a small pure-Elisp RDP
+client (=eservo-rdp.el=): =length:JSON= TCP framing, no
+dependencies.
+
+Two ways up:
+
+- *Launch* (desktop Linux): leave =eservo-servo-port= nil; eservo
+  starts =servoshell= (or =servo=) from PATH with an ephemeral
+  =--devtools=PORT= and attaches.  Get servo from
+  https://servo.org/download (nightly tarballs).
+- *Attach* (Android/Termux, remote, or sharing one servo): set
+  =eservo-servo-port= (and =eservo-servo-host= when the server is
+  another machine) to a servo already running with =--devtools=.
+  From Termux Emacs this makes a servo on the same device — or on a
+  desktop over the LAN — the engine Emacs drives.
+
+Ops (goto, snapshot with =[N]= refs, React-safe fill, click, keys,
+wait, extract, evaluate) run as JavaScript in the live page via the
+console actor's =evaluateJS=, so the automation surface is the page
+DOM, not accessibility-tree scraping.
+
+Honest limits (also in =eservo-servo.el= Commentary): servo's RDP
+devtools subset has no screenshots and no cookie access — those ops
+are nil and surface as clear errors (which also means
+=eservo-session-*= does not work on this backend); =keys= synthesizes
+untrusted JS events (prefer =fill=); a live-servo smoke test against
+a real nightly is still pending (the suite tests the protocol
+against a faithful fake server — see =tests/test-servo.el=).
+
 ** adb — Android device browser (best effort)
+
+What is adb FOR?  It is the bridge for the device you actually hold:
+it drives the real on-device browser (including the servo app
+itself — set =eservo-adb-browser-package= ="org.servo.servoshell"=)
+over USB/wireless debugging from desktop Emacs, and from Termux
+via =pkg install android-tools=.  When you need the DOM-level
+control of the servo backend instead, use attach mode above.
 
 =M-x eservo-start C-u RET adb= (or =(setq eservo-backend 'adb)=).
 Opens URLs in the device browser, taps and types via =input tap= /

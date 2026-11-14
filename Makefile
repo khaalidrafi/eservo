@@ -4,7 +4,7 @@ EMACS ?= emacs
 # Elisp + child processes.  -L . is enough for the require chain.
 LOAD = -L .
 
-SRCS = eservo.el eservo-backend.el eservo-ws.el eservo-cdp.el \
+SRCS = eservo.el eservo-backend.el eservo-ws.el eservo-rdp.el eservo-cdp.el eservo-servo.el \
        eservo-session.el eservo-script.el eservo-adb.el
 
 all: compile

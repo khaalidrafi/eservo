@@ -8,8 +8,9 @@
 
 ;; eservo drives a browser through a small set of primitive operations
 ;; ("ops").  A backend is just a bundle of functions implementing those
-;; ops; today there are two: `cdp' (Chromium/Chrome DevTools Protocol,
-;; the default) and `adb' (best-effort Android via `adb shell').
+;; ops; today there are three: `cdp' (Chromium/Chrome DevTools Protocol,
+;; the default), `servo' (the Servo engine over its Firefox-RDP devtools
+;; server) and `adb' (best-effort Android via `adb shell').
 ;;
 ;; Keeping dispatch in ONE struct means the interactive commands in
 ;; eservo.el and the script runner in eservo-script.el never care which
@@ -60,6 +61,7 @@ these ops, question whether it belongs in eservo v0.1 at all."
 
 (defconst eservo-backend--builtins
   '((cdp . eservo-cdp-make-backend)
+    (servo . eservo-servo-make-backend)
     (adb . eservo-adb-make-backend))
   "Backends shipped with eservo (symbol -> constructor function).")
 

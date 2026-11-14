@@ -111,3 +111,50 @@ tests; they are classic Elisp traps, so the fixes carry comments:
   https://example.org= -> =eservo-snapshot=.
 - Termux specifics (android-tools adb path, storage permissions) are
   documented from the adb manual, not tested on-device.
+
+* 2026-11-14 servo backend unit (RDP) — review notes
+
+** What landed
+- =eservo-rdp.el=: pure-Elisp Firefox RDP client (the protocol
+  servo's devtools speaks when started =--devtools=PORT=).
+  =length:JSON= TCP framing, root-hello handshake, request/reply
+  matching BY ACTOR with an optional =match= predicate (RDP has no
+  request ids; the predicate is what keeps connect echoes and
+  tabListChanged notifications from being misread as replies).
+- =eservo-servo.el=: backend =servo= — launch (desktop: servoshell
+  from PATH + ephemeral devtools port) or ATTACH
+  (=eservo-servo-port= / =eservo-servo-host=; the Android/Termux
+  path).  All ops run as page JS through the console actor's
+  evaluateJS; snapshot/fill/click JS mirrored from the cdp backend
+  so agents read both identically.  Screenshot + cookies = nil on
+  purpose (servo's devtools subset has neither).
+- Registered in =eservo-backend--builtins=; =eservo-backend= choice
+  updated; README servo section + the "what is adb for" answer.
+- Suite: 69/69 (13 new: 4 framing unit tests + 9 against a fake RDP
+  server whose packet shapes are taken from a real servo session
+  log in the Servo Book — hello/traits, listTabs+consoleActor,
+  evaluateJS result/exceptionMessage, plus a connect-echo race).
+
+** Bugs caught by the gate while landing (the reason the gate exists)
+- cl-defstruct accessor naming: =(:conc-name eservo-rdp--)= needed;
+  default accessors would have been =eservo-rdp-conn-PROC= — the
+  strict byte-compile caught it as unknown functions.
+- =(cl-block 'wait)= quoted the block name; =cl-return-from= then
+  missed it.  Two occurrences.
+- Hand-counted packet lengths in framing tests (24 vs 22): replaced
+  with computed =eservo-servo-test--frame= strings.
+- json-encode nests non-dotted alist entries one level deeper
+  ((tabs (TAB)) -> [[TAB]]): the fake's literals now use dotted
+  pairs; worth remembering for any future RDP test data.
+
+** What I could NOT verify here
+- No servo binary in this sandbox: the backend is verified against
+  the faithful fake only.  First live smoke on a real nightly:
+  =./servoshell --devtools=6080 https://example.org= then
+  =(setq eservo-servo-port 6080)= / =M-x eservo-start C-u RET servo=.
+- Whether servo's console actor survives cross-origin navigations
+  (goto mid-session) is untested; if it drops, the reconnect path
+  is =eservo-stop= + =eservo-start= (documented in the README).
+- The servo Android app's package name (org.servo.servoshell) is
+  from the Servo Book build docs; verify against the installed APK
+  before relying on the adb+servo combo.
