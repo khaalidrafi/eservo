@@ -19,9 +19,13 @@ use std::time::{Duration, Instant};
 use euclid::{Scale, Size2D};
 use url::Url;
 
-use servo::rendering_context::RenderingContext;
+use servo::RenderingContext;
 use servo::SoftwareRenderingContext;
 use servo::{Servo, ServoBuilder, WebView, WebViewBuilder};
+// Embedder-traits items are re-exported at the servo crate ROOT
+// (verified against konippi/servo-fetch bridge.rs, 2026-11-15);
+// the `servo::embedder_traits::` module path does not exist.
+use servo::EventLoopWaker;
 
 use crate::engine::{Msg, Reply, ReqOp};
 
@@ -75,8 +79,8 @@ impl Clone for ChannelWaker {
     }
 }
 
-impl servo::embedder_traits::EventLoopWaker for ChannelWaker {
-    fn clone_box(&self) -> Box<dyn servo::embedder_traits::EventLoopWaker> {
+impl EventLoopWaker for ChannelWaker {
+    fn clone_box(&self) -> Box<dyn EventLoopWaker> {
         Box::new(self.clone())
     }
     fn wake(&self) {
