@@ -1,0 +1,54 @@
+[package]
+name = "eservo-embedded-module"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+license = "GPL-3.0-or-later"
+description = "libeservo: the servo web engine embedded in the Emacs process"
+publish = false
+
+# The module file Emacs dlopens.  Named `eservo` so the artifact is
+# libeservo.so / libeservo.dylib / eservo.dll -- matching
+# eservo-embedded.el's `eservo-embedded--module-name'.
+[lib]
+name = "eservo"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[features]
+default = []
+# The real engine.  OFF by default: the fast CI lane (`cargo build
+# --offline`) must build with ZERO dependencies -- no crates.io network
+# access -- and load the module into stock Emacs to prove the ABI glue.
+# The servo lane (`cargo build --features servo`) links the engine and
+# doubles as the compile pin against the real servo crate.
+servo = ["dep:servo", "dep:euclid", "dep:url"]
+
+[dependencies]
+# Version-pinned on purpose: servo is 0.x with monthly releases and
+# breaking changes are expected in minors; upgrades go through the pin
+# job (.github/workflows/native.yml, job `servo`), never blind.
+# Feature shape mirrors the reference embedder (konippi/servo-fetch):
+# default-features=false + baked-in-resources (fonts/config baked into
+# the module -- no resources/ tree to install, which is what makes the
+# Android in-app story simple) ; `webgl` is dropped because the
+# software-rendering lane does not provide it.
+servo = { version = "=0.8.0", optional = true, default-features = false, features = [
+    "baked-in-resources",
+    "brotli-compression-stream",
+    "js_jit",
+    "webcrypto",
+] }
+# Types crossing the servo API (Size2D for resize, Scale for hidpi,
+# Url for navigation).  These must stay version-compatible with what
+# servo 0.8 itself uses -- the pin job verifies; if they ever diverge
+# the compiler says so at the seam, which is exactly where we want it.
+euclid = { version = "0.22", optional = true }
+url = { version = "2", optional = true }
+
+[profile.release]
+# NO panic=abort and NO lto: this is a library dlopen'd INTO Emacs.
+# Panics must stay catchable (every op boundary runs catch_unwind) and
+# CI build times matter for the pin lane.
+opt-level = 2
+debug = "line-tables-only"

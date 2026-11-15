@@ -196,3 +196,76 @@ tests; they are classic Elisp traps, so the fixes carry comments:
    is the working start path until that APK exists.  Same patch
    series carries the usage-stats primitive (org-activity native
    unit).
+
+* 2026-11-15 embedded engine module (libeservo) — review notes
+
+Owner order (Discord): "We are building an embedded browser.  It should
+be embedded into the Emacs app!  Read servo docs!" — and, on sparse
+docs: read the servo source itself.  This unit lands that architecture.
+
+** What landed
+- =native/src/emacs_api.rs=: hand-rolled emacs-module ABI (zero
+  dependencies).  Prefix-declared =emacs_env= (Emacs 27+ =size= member
+  first), two-call =copy_string_contents=, =non_local_exit_signal=
+  error pattern, =defalias= registration.  This is what lets the fast
+  CI lane build OFFLINE and prove the ABI in a real Emacs 30.1
+  (=native/smoke.el=: feature, 16 primitives, string/bool returns,
+  error signaling, not-linked boot error, safe stop).
+- =native/src/engine.rs=: engine thread + request/reply channel (the
+  konippi/servo-fetch blocking pattern); servo's EventLoopWaker
+  wakeups arrive as messages so =spin_event_loop= runs on the engine
+  thread.  Without the servo feature the thread is a stub answering
+  every op with the not-linked error.
+- =native/src/servo_glue.rs= (feature =servo=): the real engine —
+  ServoBuilder + event_loop_waker, WebViewBuilder over a
+  SoftwareRenderingContext, =load=/=resize=/=paint=/=present= — coded
+  against servo's documented surface (book.servo.org/embedding +
+  components/servo/examples/winit_minimal.rs, fetched 2026-11-15).
+  Six =PIN:= sites fail honestly at runtime instead of guessing; the
+  pin list is docs/EMBEDDED-SERVO.org.
+- =native/src/lib.rs=: the =eservo-embedded-module-*= primitives 1:1
+  with the Elisp op set; every boundary is catch_unwind'd (a Rust
+  panic must never take Emacs down) and the engine Mutex poisoning is
+  a clear error, not a hang.
+- Elisp: =embedded= registered as a builtin backend
+  (eservo-backend.el), defcustom choice (eservo.el), Makefile SRCS,
+  AGENTS.md embedded-engine exception, README section, 8 new hermetic
+  ERT tests (82 total; the suite never needs the real module).
+- CI =native.yml=: job =module= (zero-dep + real-Emacs smoke, must
+  stay green) and job =servo= (compile pin against servo =0.8.0=,
+  continue-on-error while pinning, artifact upload).
+
+** Evidence packet
+- No emacs/rustc in this sandbox: the Elisp gate is GitHub CI
+  (=make compile= warnings-as-errors + =make test=, 82 tests) and the
+  Rust gate is native.yml.  Check both runs after push.
+- API verification trail: servo Book embedding overview, servo crate
+  lib.rs public exports, the official winit_minimal.rs example, and
+  the reference embedder's workspace Cargo.toml (konippi/servo-fetch,
+  servo =0.7.0= from crates.io — we pin =0.8.0=, the current release
+  per servo.org, 2026-11-07).
+
+** Review queue (risk-tiered, highest first)
+- TODO P1 — =emacs_api.rs= env prefix: the whole ABI rests on the
+  declared field order (and the Emacs 27 =size= member).  The CI smoke
+  is the proof; read the struct once against emacs-module.h anyway.
+- TODO P1 — the six =PIN:= sites in =servo_glue.rs= (pin list,
+  docs/EMBEDDED-SERVO.org): software-context constructor, pixel
+  readback, keyboard/mouse event construction, load notifications,
+  the JS-eval seam for DOM ops, user-agent/HTTPS knobs.
+- TODO P2 — engine lifecycle: =goto= holds the engine lock while
+  waiting (up to 30 s) — a concurrent =stop= waits politely instead of
+  erroring; single-driver design makes this fine today, note it if
+  multi-driver ever lands.
+- TODO P2 — =keys= token vocabulary ("RET", text) must be translated
+  engine-side when PIN item 3 is wired; keep it aligned with the cdp
+  backend's token set so scripts read the same across backends.
+
+** What I could NOT verify here
+- Rust: not compiled locally (no toolchain in the sandbox).  The
+  module lane compiles the zero-dep core; the servo lane is the first
+  real compile of the glue — expect signature drift fixes THERE, in
+  the PIN-marked functions only.
+- Servo 0.8.0's exact API beyond the documented surface: docs.rs
+  failed to build servo 0.8.0 (design doc notes), which is why the
+  pin lane compiles against source.

@@ -23,6 +23,16 @@ wins.
 - Pure Elisp + child processes only: no external Emacs packages, no
   xwidgets/GUI deps.  eservo must keep running on Linux, TTY and
   Android/Termux unchanged (Owner priority order).
+- Embedded-engine exception (Owner order, Discord 2026-11-15): eservo
+  IS an embedded browser — the servo engine may be linked into the
+  Emacs process through the optional libeservo dynamic module
+  (native/, eservo-embedded.el, docs/EMBEDDED-SERVO.org).  The core
+  law stands around it: the Elisp layer stays pure, the module is
+  OPTIONAL (every op degrades to a clear install hint without it),
+  and `make compile` / `make test` must stay green on machines with
+  no Rust toolchain.  Rust changes land only through the native.yml
+  lanes; the servo crate version is pinned and upgrades go through
+  the pin job, never blind.
 - The backend op set (eservo-backend.el defstruct) stays SMALL.  A new
   capability must fit an existing op or argue hard for a new one.
 - Secrets law: human credentials via `auth-source` only; session files

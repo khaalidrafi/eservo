@@ -3,3 +3,7 @@
 *~
 #*#
 .dir-locals.el
+# Rust build tree for native/ (the module .so is a build artifact).
+native/target/
+# Cargo lock is INPUT for the servo pin lane; keep it tracked.
+!native/Cargo.lock

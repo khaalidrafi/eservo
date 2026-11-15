@@ -1,0 +1,74 @@
+name: native
+
+# The libeservo dynamic module: servo EMBEDDED in the Emacs process
+# (docs/EMBEDDED-SERVO.org).  Two lanes:
+#
+#   module — zero-dependency build loaded into a REAL Emacs 30.1: the
+#            ABI smoke gate.  Must stay green on every push.
+#   servo  — cargo build --features servo: the compile pin against the
+#            real servo crate (=0.8.0).  continue-on-error while the
+#            API is being pinned; flip it off after the first green run
+#            and treat red as a blocker from then on.
+
+on:
+  push:
+    branches: [ai/main, main]
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+  pull_request:
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+  workflow_dispatch:
+  schedule:
+    # Weekly re-proof of the servo pin even when native/ is quiet.
+    - cron: "0 4 * * 1"
+
+jobs:
+  module:
+    name: zero-dep module ABI (loads into real Emacs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: purcell/setup-emacs@master
+        with:
+          version: "30.1"
+      - name: Build (no features, offline)
+        working-directory: native
+        run: cargo build --release --offline
+      - name: Smoke into Emacs 30.1
+        run: |
+          so="native/target/release/libeservo.so"
+          test -f "$so"
+          ESERVO_MODULE="$PWD/$so" emacs --batch -l native/smoke.el
+
+  servo:
+    name: engine glue compile pin (servo =0.8.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # While the servo API surface is being pinned, this lane is
+    # informational: it must not block merges.  Flip to false after the
+    # first green run (docs/EMBEDDED-SERVO.org, build lanes).
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo target
+        uses: actions/cache@v4
+        with:
+          path: native/target
+          key: eservo-servo-pin-${{ runner.os }}-${{ hashFiles('native/Cargo.toml') }}
+      - name: Build with the servo feature
+        working-directory: native
+        run: cargo build --release --features servo
+      - name: Upload module artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libeservo-servo-lane
+          path: native/target/release/libeservo.so
+          if-no-files-found: warn
+          retention-days: 14

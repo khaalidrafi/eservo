@@ -1,0 +1,215 @@
+#+TITLE: eservo embedded servo engine — design and build spec
+#+STARTUP: showall
+
+Owner order (Discord, 2026-11-15): eservo is an *embedded* browser.
+No separate servo APK, no devtools server, no second process — the
+servo engine runs *inside the Emacs process*, natively on Android and
+on desktop.  This document is the design; it is written directly from
+the servo documentation so the next engineer does not have to
+re-derive it.
+
+* What the servo documentation says (read before touching native/)
+
+- Servo is a Rust library since 2026-04-13: the =servo= crate's first
+  crates.io release was 0.1.0, current is 0.8.0 (2026-11-07), with
+  half-yearly LTS versions for embedders that prefer scheduled major
+  upgrades (servo.org blog, "Servo is now available on crates.io").
+  The Servo team calls the embedding API stable enough to rely on,
+  with breaking changes expected in monthly releases — pin the
+  version.
+- The Servo Book has an Embedding section
+  (book.servo.org/embedding/overview.html).  It is honest that docs
+  are sparse; the load-bearing facts are: servo can be built with
+  plain =cargo= (not only =./mach=) if the mach environment variables
+  are supplied, the embedder-facing crate is =servo_embedder_traits=,
+  and Android + OpenHarmony are supported embedder platforms.
+- Embedding model (unchanged in shape since the classic tutorial,
+  paulrouget/servo-embedding-example, and confirmed by the 2025 talk
+  "The joy and value of embedded servo systems"):
+  1. the embedder provides an event loop + an =EventLoopWaker= that
+     servo's threads use to wake the embedder,
+  2. the embedder implements the callbacks trait (=WindowMethods=
+     historically, =EmbedderMethods= in the current crate) — GL
+     context access, framebuffer size, =present()=, navigation
+     notifications (=load_start= / =load_end= / =set_page_title= / ...),
+  3. the embedder drives servo by sending events (browser creation,
+     =SelectBrowser=, mouse/key/scroll events, =Reload= / navigation)
+     through =Servo::handle_events=.
+- Offscreen rendering exists and is production-tested: servo.org blog
+  2024-01-19 ("Tauri update: embedding prototype, offscreen
+  rendering", PR servo#30767) — servo draws to an offscreen
+  framebuffer the *application* presents; webviews can be positioned,
+  made transparent, and multiplied inside one window.
+- Proof that full offscreen *software* rendering works headlessly:
+  konippi/servo-fetch (MIT OR Apache-2.0) embeds the servo crate and
+  serves =--format png= screenshots with a *software renderer*, no GPU
+  ("Screenshots without GPU — software renderer captures PNG/full-page
+  screenshots anywhere"); its Linux runtime deps are just libEGL,
+  fontconfig, freetype.  Its blocking-call API shape (one worker
+  engine, request/reply) is the pattern this module copies.
+- Android (book.servo.org/building/android.html): supported target is
+  =aarch64-linux-android=, NDK 28.2.13676358,
+  =./mach build --android= builds and =./mach install --android=
+  installs the reference app (org.servo.servoshell).  For a *library*
+  instead of the app, cargo-ndk (bbqsrc/cargo-ndk) is the standard
+  way to build a Rust =cdylib= for Android ABIs with the jniLibs
+  directory layout.
+- Repository layout (github.com/servo/servo, main): library crates in
+  =components/=, the reference embedder app in =ports/servoshell=, a C
+  API under =ffi/capi=, and =resources/= (fonts/config data the
+  engine wants at runtime).
+
+* Architecture
+
+#+begin_example
+Emacs process (desktop or the Android app)
+├── eservo.el / eservo-script.el      (unchanged command layer)
+├── eservo-embedded.el                (backend: op -> module call)
+└── libeservo.so  (dynamic module, dlopen'd by Emacs)
+    ├── emacs-module ABI (hand-rolled, native/src/emacs_api.rs)
+    ├── engine thread + request/reply channel (native/src/engine.rs)
+    └── servo crate (optional build feature)  ← THE ENGINE
+        offscreen software rendering → PNG bytes / DOM ops
+#+end_example
+
+- *One process.* Emacs loads =libeservo.so= with =module-load=; the
+  module defines the =eservo-embedded-module-*= functions.  No APK, no
+  devtools port, no localhost TCP.  On Android this means the engine
+  lives inside the Emacs app itself.
+- *Elisp stays pure.* =eservo-embedded.el= is plain Elisp that
+  translates the existing backend op set (eservo-backend.el) into
+  module calls.  Without the module every op errors with a clear
+  install hint; the other backends (cdp, adb, servo-RDP) are
+  unaffected.  The core keeps the Linux/TTY/Android no-dependency
+  guarantee.
+- *Engine thread.* The module boots servo on a dedicated thread and
+  talks to it over a channel; every Elisp-visible op is synchronous
+  (pump-until-done, the servo-fetch blocking pattern).  The
+  =EventLoopWaker= is a condvar on that channel — servo wakes the
+  pump thread, the pump thread drains =handle_events=.
+- *Ops, module-side.* boot, stop, alive-p, goto, url, snapshot, fill,
+  click, keys, extract, evaluate, wait-selector, screenshot, resize —
+  mirroring the backend ops 1:1 so the Elisp layer stays thin.
+  =screenshot= takes a file PATH and writes PNG bytes from Rust
+  (avoids raw-byte Elisp strings).  Cookies are not exposed in v0
+  (same honest limit as the servo-RDP lane, so =eservo-session-*= is
+  unavailable on this backend until servo's cookie story is wired).
+
+* Rendering phases
+
+- *Phase 0 (this landing).* Ops + =screenshot=: the engine renders
+  offscreen with the software renderer on demand.  =eservo-goto= /
+  =snapshot= / =fill= / =click= / =extract= / =evaluate= work on the
+  DOM directly (agent-grade driving — the eservo sweet spot), and
+  =eservo-screenshot= writes a PNG you can view in Emacs.
+- *Phase 1 (next).* Live view: =M-x eservo-view= opens a buffer that
+  pumps frames (software-rendered, capped ~20 fps) into an Emacs
+  image; keys/clicks in the buffer map to servo input events.  No
+  Emacs C changes needed.
+- *Phase 2 (Android polish).* Direct composition: a patched
+  emacs-android APK build bundles =libeservo.so= in =jniLibs= =and=
+  hosts a servo surface child view over the Emacs frame for
+  GPU-composited 60 fps.  Requires the Emacs app rebuild; Phase 1
+  already delivers full embedded browsing without it.
+
+* Android packaging (how the module gets into the phone)
+
+1. Build: =cargo ndk -t arm64-v8a -o jniLibs build --release
+   --features servo= with NDK 28.2.13676358 (the version servo pins).
+2. Install paths, in order of preference:
+   - Patched APK: copy =jniLibs/arm64-v8a/libeservo.so= into the
+     emacs-android build (Gradle picks up =jniLibs= automatically);
+     Android's linker then resolves a bare =libeservo= from
+     =nativeLibraryDir=.  This is the blessed path (Phase 2).
+   - Modules dir: =(setq eservo-embedded-module-file
+     "/data/data/.../files/libeservo.so")= or drop it in
+     =~/.emacs.d/modules/= — =M-x eservo-embedded-load-module= finds
+     it; whether the app's =targetSdk= allows =dlopen= from app-files
+     must be verified on device (verify, then record here).
+3. Resources: servo wants its =resources/= tree; set
+   =eservo-embedded-resources-dir= (defaults to a dir under
+   =eservo-state-dir=).
+
+* Build lanes (Guix-box law: no local source builds)
+
+- =native.yml= job =module=: builds the crate WITHOUT the servo
+  feature (fast, no heavy deps) and *loads it into a real Emacs 30.1*
+  in CI — this is the ABI smoke test for the hand-rolled
+  emacs-module bindings.  Must stay green on every push.
+- =native.yml= job =servo=: =cargo build --release --features servo=
+  (the pin job; workflow_dispatch + weekly).  This is where the
+  engine glue gets compiled against the real =servo= crate.  It is
+  =continue-on-error: true= *while the API is being pinned*; flip it
+  off after the first green run and treat red as a blocker from then
+  on.
+- The =servo= dependency version is pinned in =native/Cargo.toml=;
+  upgrades go through the pin job, never blind.
+
+* Honest status (2026-11-15, after the module landing)
+
+| Piece                          | State                                    |
+|--------------------------------+------------------------------------------|
+| Elisp backend + tests          | landed, offline-tested, CI-gated         |
+| emacs-module ABI bindings      | landed; CI loads them into real Emacs    |
+|                                | 30.1 (native.yml job `module')           |
+| engine thread/channel          | landed (engine.rs, both feature configs) |
+| servo glue (ServoBuilder etc.) | written against the documented surface   |
+|                                | (winit_minimal.rs, read 2026-11-15);     |
+|                                | FIRST COMPILE PIN PENDING in native.yml  |
+|                                | job `servo' (continue-on-error)          |
+| v0 op support when linked      | boot/stop/alive-p/goto/url/resize        |
+| Phase 1 live view              | spec'd, not started                      |
+| Phase 2 APK bundling           | spec'd, not started                      |
+
+* Pin list (what job `servo' must resolve, in order)
+
+The glue was written from servo's documentation and its own winit
+example; these are the exact sites the compile pin must verify (each
+is marked =PIN:= in native/src/servo_glue.rs):
+
+1. =SoftwareRenderingContext::new= signature (the offscreen software
+   context) — mirror konippi/servo-fetch =screenshot.rs= if it differs.
+2. Pixel readback for =screenshot=: read the software framebuffer,
+   encode PNG (servo-fetch does exactly this in its screenshot path).
+3. Keyboard (and mouse) =InputEvent= construction for =keys= and
+   coordinate clicks — the winit example shows only the Wheel shape.
+4. Load-complete notifications: wire the WebViewDelegate/ServoDelegate
+   load + URL-change methods (replaces the v0 new-frame heuristic in
+   =goto=; also gives post-redirect URLs).
+5. JS-evaluation seam for the DOM ops (snapshot / fill / click /
+   extract / evaluate / wait-selector).  Candidate paths, in
+   preference order: (a) the servo crate's =javascript_evaluator=
+   surface — not publicly exported on servo main as of 2026-11-15;
+   check whether a feature flag exposes it, (b) however
+   konippi/servo-fetch evaluates page JS (crates/servo-fetch/src/js/),
+   (c) servo's devtools actor system driven in-process.  Until one is
+   wired these ops fail with an error naming this file.
+6. ServoBuilder knobs: =user_agent= (accepted by the Elisp boot call,
+   not yet forwarded engine-side) and the rustls crypto-provider
+   question for HTTPS (the winit example installs aws-lc-rs before
+   building servo).
+
+After the first green =servo= run: flip its =continue-on-error= to
+false, treat red as a blocker, and re-check this list only on servo
+version bumps (which go through the pin job by law, AGENTS.md).
+
+* Licensing
+
+The module is GPL-3.0-or-later like eservo.  Servo is MPL-2.0, which
+is GPL-compatible (MPL-2.0's secondary-license mechanism), so linking
+the engine into the module is fine; note it in any redistribution
+notices.
+
+* Sources
+
+- https://servo.org/blog/2026/04/13/servo-0.1.0-release
+- https://book.servo.org/embedding/overview.html
+- https://book.servo.org/building/android.html
+- https://servo.org/blog/2024/01/19/embedding-update
+- https://servo.org/files/2025-09-13-the-joy-and-value-of-embedded-servo-systems.pdf
+- https://github.com/konippi/servo-fetch (reference embedder)
+- https://github.com/paulrouget/servo-embedding-example (classic
+  tutorial; the embedding *model* still matches)
+- https://github.com/bbqsrc/cargo-ndk
+- https://github.com/servo/servo (components/, ports/servoshell,
+  ffi/capi, resources/)

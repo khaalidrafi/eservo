@@ -58,12 +58,16 @@
 
 (defcustom eservo-backend 'cdp
   "Default backend used by `eservo-start'.
-`cdp' drives Chromium/Chrome via the DevTools Protocol; `servo'
-drives the Servo engine over its devtools server (launch on desktop,
-or attach from Android/Termux via `eservo-servo-port'); `adb' drives
-an Android device browser over `adb shell' (best effort)."
+`cdp' drives Chromium/Chrome via the DevTools Protocol; `embedded'
+runs the servo engine INSIDE the Emacs process through the optional
+libeservo dynamic module (M-x eservo-embedded-load-module; see
+docs/EMBEDDED-SERVO.org); `servo' drives a servo over its devtools
+server (launch on desktop, or attach from Android/Termux via
+`eservo-servo-port'); `adb' drives an Android device browser over
+`adb shell' (best effort)."
   :group 'eservo
   :type '(choice (const :tag "Chromium/Chrome via CDP" cdp)
+                 (const :tag "Servo engine embedded in Emacs" embedded)
                  (const :tag "Servo engine via RDP devtools" servo)
                  (const :tag "Android device via adb" adb)
                  (symbol :tag "Other registered backend")))

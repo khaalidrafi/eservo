@@ -14,9 +14,13 @@ Android device browser over adb, then:
   every command plus the live page snapshot, ready to paste into any
   web/cloud chat — the Emacs-native answer to browser-use / cua-driver.
 
-It is pure Elisp + external child processes.  No xwidgets, no GUI
-libraries, no package dependencies beyond Emacs 27.1 — so the same
-commands run on a Linux desktop, from a TTY, and on Android/Termux.
+It is pure Elisp + external child processes, plus ONE optional
+collection of native code: the libeservo dynamic module (native/),
+which embeds the servo engine IN the Emacs process.  No xwidgets, no
+GUI libraries, no package dependencies beyond Emacs 27.1 — so the same
+commands run on a Linux desktop, from a TTY, and on Android/Termux,
+and every op degrades to a clear install hint when the module is
+absent.
 
 * Install
 
@@ -33,11 +37,31 @@ Or with =use-package= / =:vc= to your taste.  Everything else
 demand when you pick a backend.
 
 Requirements: Emacs 27.1+, and for the default backend a
-Chromium/Chrome binary.  For Android: the servo nightly APK for the
-on-device servo lane (below), and =adb= (Termux: =pkg install
-android-tools=) for the adb backend and the servo adb fallback lane.
+Chromium/Chrome binary.  The embedded servo engine needs the libeservo
+module (below).  For Android: =adb= (Termux: =pkg install
+android-tools=) for the adb backend and the servo attach lane; the
+separate servo-APK lane is superseded by the embedded engine (its
+packaging plan, including shipping the module inside the Emacs app,
+is docs/EMBEDDED-SERVO.org).
 
 * Backends
+
+** embedded — the servo engine INSIDE Emacs (the end state)
+
+=M-x eservo-start C-u RET embedded= (or =(setq eservo-backend
+'embedded)=).  One process: Emacs dlopens =libeservo.so=, servo runs
+on a private engine thread inside Emacs, offscreen software rendering,
+no separate APK, no devtools port, no localhost TCP.  Design and build
+lanes: =docs/EMBEDDED-SERVO.org=; =M-x eservo-embedded-load-module=
+finds the module in =~/.emacs.d/modules/= or =eservo-state-dir=/lib/=
+(or set =eservo-embedded-module-file=).
+
+Honest v0 status (kept current in the design doc): boot / goto / url /
+resize work when the servo-linked module is present; screenshot, keys
+and the DOM ops (snapshot/fill/click/extract/evaluate) are pin-pending
+against servo 0.8 and fail with errors naming the design doc; cookies
+are not exposed.  The =servo= and =cdp= backends remain the full-ops
+paths today.
 
 ** cdp (default) — Chromium/Chrome DevTools Protocol
 
@@ -209,10 +233,16 @@ competent LLM.
 
 #+begin_example
 make compile   # byte-compile, warnings are errors
-make test      # 74 ERT tests, all offline (stub backends)
+make test      # 82 ERT tests, all offline (stub backends)
 #+end_example
 
 =tests/run.el= loads every =tests/test-*.el=.  No test needs a
 browser, a device or a network connection.
+
+The native module has its own lanes (=.github/workflows/native.yml=):
+=module= builds it offline with ZERO dependencies and loads it into a
+real Emacs 30.1 (ABI smoke — must stay green); =servo= compiles the
+engine glue against servo =0.8.0= (the compile pin, continue-on-error
+while the API is pinned) and uploads the built =libeservo.so=.
 
 License: GPL-3.0-or-later (see file headers).
