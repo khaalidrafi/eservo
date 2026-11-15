@@ -41,6 +41,15 @@ jobs:
         with:
           version: "31.1"
           sha256: "1da5790d9580c81932b5bf700633114468da7b3412d69faa767daebf974f4586"
+      # Resolve the dependency graph if the committed lock ever drifts
+      # from the manifest: cargo re-resolves (index search) when the
+      # lock is stale, which is FATAL offline (CI evidence 2026-11-15,
+      # run 43680197833: 'no matching package named euclid found' even
+      # with a committed lock).  Refresh first, then the offline build
+      # compiles the default feature set only — still zero-dep.
+      - name: Refresh lockfile (network)
+        working-directory: native
+        run: cargo generate-lockfile
       - name: Build (no features, offline)
         working-directory: native
         run: cargo build --release --offline
@@ -61,6 +70,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # The software-rendering lane links freetype/fontconfig through
+      # their *-sys crates, whose build scripts run pkg-config — the
+      # runner's dev headers are missing by default (CI evidence
+      # 2026-11-15, run 43680197833: freetype-sys build script exit 101).
+      - name: Install renderer dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfreetype-dev libfontconfig-dev
       - name: Cache cargo target
         uses: actions/cache@v4
         with:

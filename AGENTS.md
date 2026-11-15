@@ -12,8 +12,9 @@ wins.
   repo's first drafts and was rewritten before the first push; do not
   reintroduce it.
 - Both trailers on every commit:
-  `Co-authored-by: z.ai-agent <noreply@z.ai>` and
-  `Co-authored-by: Khalid Rafi <khaalidrafi@gmail.com>`.
+  `Co-authored-by: Z.ai agent <agent@chat.z.ai>` and
+  `Co-authored-by: Khalid Rafi <khaalidrafi@gmail.com>` (relay identity
+  corrected 2026-11-15; the old z.ai-agent form is retired).
 - Never commit directly to `main`.  Work lands on `ai/main`; use
   `ai/<topic>` branches for long work.  Small, single-purpose commits
   with messages that explain the algorithm, not just the diff.
