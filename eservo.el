@@ -89,6 +89,7 @@ Set by `eservo-start', cleared by `eservo-stop'.")
                                nil t))
     eservo-backend))
 
+;;;###autoload
 (defun eservo-start (&optional backend)
   "Start a browser session via BACKEND (default `eservo-backend').
 With \\[universal-argument] prompt for the backend.
@@ -107,6 +108,7 @@ Returns the driver.  Errors with a hint if one is already live."
              backend-name (eservo-backend-call driver 'url))
     driver))
 
+;;;###autoload
 (defun eservo-stop ()
   "Stop the browser session and clear the driver.  Harmless if none."
   (interactive)
@@ -120,11 +122,13 @@ Returns the driver.  Errors with a hint if one is already live."
   "Return the current page URL."
   (eservo-backend-call (eservo--driver-or-error) 'url))
 
+;;;###autoload
 (defun eservo-goto (url)
   "Navigate the current browser to URL."
   (interactive "Meservo goto URL: ")
   (eservo-backend-call (eservo--driver-or-error) 'goto url))
 
+;;;###autoload
 (defun eservo-snapshot ()
   "Return a compact DOM outline with [N] element refs, and show it.
 The refs are what `eservo-click' targets; agents read this text."
@@ -133,12 +137,14 @@ The refs are what `eservo-click' targets; agents read this text."
     (eservo--show "snapshot" snap)
     snap))
 
+;;;###autoload
 (defun eservo-fill (selector text)
   "Set SELECTOR's value to TEXT (React/Vue-safe input events)."
   (interactive "Meservo fill selector: \nMeservo fill text: ")
   (prog1 (eservo-backend-call (eservo--driver-or-error) 'fill selector text)
     (message "eservo: filled %s" selector)))
 
+;;;###autoload
 (defun eservo-click (ref)
   "Click element REF: a number from `eservo-snapshot' or a CSS selector."
   (interactive "Meservo click (ref number or CSS selector): ")
@@ -146,11 +152,13 @@ The refs are what `eservo-click' targets; agents read this text."
   (prog1 (eservo-backend-call (eservo--driver-or-error) 'click ref)
     (message "eservo: clicked %s" ref)))
 
+;;;###autoload
 (defun eservo-keys (keys)
   "Send KEYS to the page: tokens like \"RET\", \"TAB\" or plain text."
   (interactive "Meservo keys: ")
   (eservo-backend-call (eservo--driver-or-error) 'keys keys))
 
+;;;###autoload
 (defun eservo-wait (spec)
   "Wait for SPEC: seconds (number) or a CSS selector to appear.
 A minibuffer input like \"3\" or \"0.5\" becomes a number."
@@ -158,6 +166,7 @@ A minibuffer input like \"3\" or \"0.5\" becomes a number."
   (setq spec (eservo--maybe-number spec))
   (eservo-backend-call (eservo--driver-or-error) 'wait spec))
 
+;;;###autoload
 (defun eservo-extract (selector)
   "Return the text of all elements matching SELECTOR, and show it."
   (interactive "Meservo extract selector: ")
@@ -166,6 +175,7 @@ A minibuffer input like \"3\" or \"0.5\" becomes a number."
     (eservo--show "extract" text)
     text))
 
+;;;###autoload
 (defun eservo-screenshot (file)
   "Best-effort PNG screenshot of the page to FILE."
   (interactive "Feservo screenshot to file: ")
@@ -191,6 +201,7 @@ Numbers (already converted by a script) pass through untouched."
       (special-mode))
     (pop-to-buffer buf)))
 
+;;;###autoload
 (defun eservo-agent-brief ()
   "Print the eservo tool menu plus the current page snapshot.
 This is THE entry point for an LLM agent: everything it can do is

@@ -64,6 +64,7 @@ dir somewhere already protected."
            ".json")
    (eservo-session--dir)))
 
+;;;###autoload
 (defun eservo-credentials (site)
   "Return (USER . SECRET) for SITE from `auth-source'.
 SITE matches the `machine' field of the authinfo entry.  The secret
@@ -92,6 +93,7 @@ is never printed, stored or logged by eservo.  Add entries to
                          session:pick(sessionStorage)});
 })()")
 
+;;;###autoload
 (defun eservo-session-save (site)
   "Save the current browser session as SITE (cookies + web storage).
 Returns the file path.  Values are written to a 0600 file under
@@ -122,6 +124,7 @@ Returns the file path.  Values are written to a 0600 file under
                site (length cookies) file)
       file)))
 
+;;;###autoload
 (defun eservo-session-load (site &optional url)
   "Restore the session saved as SITE into the current browser.
 Restores cookies, navigates to the saved origin to re-apply
@@ -153,6 +156,7 @@ Returns the saved origin."
       (message "eservo: session %s restored (%d cookies)" site (length cookies))
       origin)))
 
+;;;###autoload
 (defun eservo-session-login (site &optional url)
   "Open SITE in a HEADED browser so a human can log in once.
 Any previous browser is stopped first (headless sessions would be

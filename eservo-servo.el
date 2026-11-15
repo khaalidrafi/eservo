@@ -211,6 +211,7 @@ reach the phone itself); signals a clear error otherwise."
             t)
         (kill-buffer buf)))))
 
+;;;###autoload
 (defun eservo-servo-android-start (&optional via-adb)
   "Start the servo Android app on this device, then attach to it.
 The on-device answer: Emacs and the servo app share one phone, no

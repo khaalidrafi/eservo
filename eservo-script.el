@@ -90,6 +90,7 @@ bullets and comments."
           (forward-line 1))
         (nreverse steps)))))
 
+;;;###autoload
 (defun eservo-script-run (file)
   "Execute the deterministic eservo script FILE (no AI involved).
 Starts the default backend if no browser is running.  Returns an

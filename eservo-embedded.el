@@ -30,7 +30,8 @@
 ;; that names docs/EMBEDDED-SERVO.org.  In a build without the servo
 ;; feature every engine op signals the clear not-linked error — that
 ;; is the ABI surface the fast CI lane (native.yml, job `module')
-;; proves against real Emacs 30.1.
+;; proves against real Emacs 31.1 (built from the upstream GNU
+;; tarball).
 
 ;;; Code:
 
@@ -111,6 +112,7 @@ in docs/EMBEDDED-SERVO.org explain where this lands on a phone."
    (list (expand-file-name "modules" user-emacs-directory)
          (expand-file-name "lib" eservo-state-dir))))
 
+;;;###autoload
 (defun eservo-embedded-load-module ()
   "Load the libeservo dynamic module into this Emacs.
 Tries `eservo-embedded-module-file' first, then every directory in
