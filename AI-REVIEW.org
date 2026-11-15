@@ -269,3 +269,64 @@ docs: read the servo source itself.  This unit lands that architecture.
 - Servo 0.8.0's exact API beyond the documented surface: docs.rs
   failed to build servo 0.8.0 (design doc notes), which is why the
   pin lane compiles against source.
+
+* 2026-11-15 Emacs 31 + upstream-GNU CI, package-install lane — review notes
+
+Owner orders (Discord): "Use Emacs 31, public all pkgs used in
+emacs-android, no ~/comm" and "Use Emacs from upstream GNU sources.
+Where did you find nix-emacs-ci?"  This unit answers both for eservo.
+
+** What landed
+- CI Emacs source: nix-emacs-ci (the Nix binary cache behind the
+  purcell/setup-emacs action both workflows used) is OUT.  New
+  composite action =.github/actions/setup-emacs-gnu= builds Emacs
+  31.1 from the upstream GNU release tarball
+  (ftpmirror.gnu.org/emacs/emacs-31.1.tar.xz), gated by the sha256
+  from the GNU release announcement (1da5790d..., emacs-devel
+  2026-08-24), cache-first on the installed prefix.  Used by ci.yml
+  and the native.yml module lane; the servo cargo lane needs no
+  Emacs.  This also enforces the Emacs 31 target on every gate.
+- Package-install lane: =;;;###autoload= cookies on all 18
+  interactive entry commands (eservo.el 11, session 4, script 1,
+  embedded 1, servo-android-start 1) so a =package-vc-install= /
+  =use-package :vc= clone exposes them; loaddefs-generate scraped on
+  31.1 shows exactly those 18 autoloads.  This is what lets the
+  Android config consume eservo from its PUBLIC GitHub repo with no
+  load-path hacks (the "public all pkgs, no ~/comm" law).
+- native/Cargo.lock is now tracked (.gitignore already asked for
+  it): it pins the full servo =0.8.0= tree (821 crates) and is an
+  input to the servo-lane cache key.  servo feature rename
+  webcrypto -> subtlecrypto in Cargo.toml: 0.8.0 ships =subtlecrypto=
+  (docs.rs feature list, verified 2026-11-15); =webcrypto= does not
+  exist there and would break the pin lane.
+- Makefile recipe lines fixed to tabs (space-indented recipes are a
+  GNU make syntax error — the compile gate could not even start).
+
+** Evidence packet (all on REAL upstream GNU Emacs 31.1, built in
+this sandbox from the sha256-verified GNU tarball, same configure
+flags as the CI action)
+- =make compile= (byte-compile-error-on-warn): 10/10 files, ZERO
+  warnings, exit 0.
+- =make test=: 82/82 ERT, offline, 1.0 s.
+- loaddefs-generate on the tree: 18/18 autoloads.
+
+** Review queue (risk-tiered, highest first)
+- TODO P1 — first GREEN run of the composite action on GitHub:
+  cold build is ~10-15 min; check the cache round-trip on the
+  second push and that the workflow-file push was allowed (the
+  GitHub App needed Workflows write; Owner updated perms to admin
+  2026-11-15 — this is the first workflow-content push since).
+- TODO P1 — module lane on 31.1: smoke.el loads libeservo into the
+  31.1 module ABI (first time; 30.1 was the previous proof).  The
+  declared emacs_env struct order must hold — read emacs-module.h
+  once against emacs_api.rs if it goes red.
+- TODO P2 — servo pin lane with the tracked lock + renamed feature:
+  first green run should flip continue-on-error off (repo law).
+
+** What I could NOT verify here
+- The composite action executing on a GitHub runner (YAML is
+  actionlint-clean; the build steps are the exact recipe that
+  produced this sandbox's 31.1 binary).
+- cargo: no Rust toolchain in this sandbox.  The lock was generated
+  against servo 0.8.0 upstream of this unit and the feature rename
+  is verified against the published 0.8.0 feature list.

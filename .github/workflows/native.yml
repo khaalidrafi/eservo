@@ -3,8 +3,9 @@ name: native
 # The libeservo dynamic module: servo EMBEDDED in the Emacs process
 # (docs/EMBEDDED-SERVO.org).  Two lanes:
 #
-#   module — zero-dependency build loaded into a REAL Emacs 30.1: the
-#            ABI smoke gate.  Must stay green on every push.
+#   module — zero-dependency build loaded into a REAL Emacs 31.1
+#            (built from the upstream GNU tarball): the ABI smoke
+#            gate.  Must stay green on every push.
 #   servo  — cargo build --features servo: the compile pin against the
 #            real servo crate (=0.8.0).  continue-on-error while the
 #            API is being pinned; flip it off after the first green run
@@ -29,17 +30,21 @@ jobs:
   module:
     name: zero-dep module ABI (loads into real Emacs)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: purcell/setup-emacs@master
+      # Emacs 31.1 built from the upstream GNU release tarball
+      # (no third-party binaries): .github/actions/setup-emacs-gnu.
+      - name: Set up Emacs 31.1 (upstream GNU tarball)
+        uses: ./.github/actions/setup-emacs-gnu
         with:
-          version: "30.1"
+          version: "31.1"
+          sha256: "1da5790d9580c81932b5bf700633114468da7b3412d69faa767daebf974f4586"
       - name: Build (no features, offline)
         working-directory: native
         run: cargo build --release --offline
-      - name: Smoke into Emacs 30.1
+      - name: Smoke into Emacs 31.1
         run: |
           so="native/target/release/libeservo.so"
           test -f "$so"
@@ -60,7 +65,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: native/target
-          key: eservo-servo-pin-${{ runner.os }}-${{ hashFiles('native/Cargo.toml') }}
+          key: eservo-servo-pin-${{ runner.os }}-${{ hashFiles('native/Cargo.toml', 'native/Cargo.lock') }}
       - name: Build with the servo feature
         working-directory: native
         run: cargo build --release --features servo

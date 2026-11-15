@@ -241,8 +241,12 @@ browser, a device or a network connection.
 
 The native module has its own lanes (=.github/workflows/native.yml=):
 =module= builds it offline with ZERO dependencies and loads it into a
-real Emacs 30.1 (ABI smoke — must stay green); =servo= compiles the
+real Emacs 31.1 (ABI smoke — must stay green); =servo= compiles the
 engine glue against servo =0.8.0= (the compile pin, continue-on-error
 while the API is pinned) and uploads the built =libeservo.so=.
+
+CI Emacs comes from the upstream GNU release tarball
+=(.github/actions/setup-emacs-gnu)=: the sha256 is pinned to the GNU
+release announcement, so no third-party binaries enter the gates.
 
 License: GPL-3.0-or-later (see file headers).

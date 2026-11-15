@@ -133,9 +133,10 @@ Emacs process (desktop or the Android app)
 * Build lanes (Guix-box law: no local source builds)
 
 - =native.yml= job =module=: builds the crate WITHOUT the servo
-  feature (fast, no heavy deps) and *loads it into a real Emacs 30.1*
-  in CI — this is the ABI smoke test for the hand-rolled
-  emacs-module bindings.  Must stay green on every push.
+  feature (fast, no heavy deps) and *loads it into a real Emacs 31.1*
+  (built from the upstream GNU tarball via the setup-emacs-gnu
+  composite action) in CI — this is the ABI smoke test for the
+  hand-rolled emacs-module bindings.  Must stay green on every push.
 - =native.yml= job =servo=: =cargo build --release --features servo=
   (the pin job; workflow_dispatch + weekly).  This is where the
   engine glue gets compiled against the real =servo= crate.  It is
@@ -150,8 +151,8 @@ Emacs process (desktop or the Android app)
 | Piece                          | State                                    |
 |--------------------------------+------------------------------------------|
 | Elisp backend + tests          | landed, offline-tested, CI-gated         |
-| emacs-module ABI bindings      | landed; CI loads them into real Emacs    |
-|                                | 30.1 (native.yml job `module')           |
+| emacs-module ABI bindings      | landed; CI loads them into real Emacs |
+|                                | 31.1 (native.yml job `module')        |
 | engine thread/channel          | landed (engine.rs, both feature configs) |
 | servo glue (ServoBuilder etc.) | written against the documented surface   |
 |                                | (winit_minimal.rs, read 2026-11-15);     |
