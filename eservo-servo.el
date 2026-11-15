@@ -20,11 +20,16 @@
 ;;   servo app (org.servo.servoshell, the servo.org nightly APK) with
 ;;   the servoargs intent extra "--devtools=PORT" and attaches on
 ;;   127.0.0.1 -- the attach path, just over loopback.  The app is
-;;   started through the `eservo-servo-android-start-function' seam:
-;;   the patched-Emacs primitive `android-start-activity' by default
-;;   (stock Emacs Android does not have it), or `adb shell am start'
-;;   with a prefix arg / automatically when the primitive is missing
-;;   and adb is on PATH.
+;;   started through the `eservo-servo-android-start-function' seam,
+;;   picked automatically in this order:
+;;   1. the patched-Emacs primitive `android-start-activity'
+;;      (stock Emacs Android does not have it);
+;;   2. plain `am start' (`termux-am' from the Termux/emacshell
+;;      prefix, else /system/bin/am) -- zero extra dependencies, the
+;;      lane emacshell and Android <= 11 phones can always use;
+;;   3. `adb shell am start' with a prefix arg, or when neither of
+;;      the above exists (needs android-tools + wireless-debugging
+;;      pairing).
 ;;
 ;; - LAUNCH (desktop Linux): `eservo-servo-port' nil (default) starts
 ;;   `servoshell' (or `servo') from PATH with an ephemeral devtools
@@ -116,9 +121,11 @@ extras.  The default `eservo-servo-android--start-via-emacs' uses the
 patched-Emacs primitive
   (android-start-activity ACTIVITY &optional EXTRAS-ALIST)
 where EXTRAS-ALIST is that same alist of string pairs; stock Emacs
-Android does not define the primitive.  Set this to
-`eservo-servo-android--start-via-adb' to always start over
-`adb shell am start' instead."
+Android does not define the primitive.  `eservo-servo-android-start'
+then falls back to `eservo-servo-android--start-via-am' (plain
+`am start', no dependencies) and, failing that, to
+`eservo-servo-android--start-via-adb'; set this variable to either
+function to force that lane."
   :group 'eservo-servo
   :type 'function)
 
@@ -183,6 +190,47 @@ error pointing at the adb lane instead of failing obscurely."
   (android-start-activity activity extras)
   t)
 
+(defun eservo-servo-android--am-executable ()
+  "Return an `am' launcher usable from this Emacs, or nil.
+`termux-am' from the Termux/emacshell prefix (found through
+`exec-path'; early-init.el there prepends $PREFIX/bin) wins: it
+works on every Android, including 12+ where SELinux denies
+untrusted apps the execution of the system am wrapper.  Plain
+/system/bin/am is the Android <= 11 answer; it is checked by
+absolute path because stock Emacs on Android usually does not
+carry /system/bin on `exec-path'."
+  (or (executable-find "termux-am")
+      (and (file-executable-p "/system/bin/am")
+           "/system/bin/am")))
+
+(defun eservo-servo-android--start-via-am (activity extras)
+  "Start the servo app ACTIVITY with EXTRAS through plain `am start'.
+The zero-dependency Android lane: no patched-Emacs primitive, no
+adb, no wireless-debugging pairing -- just the same `am start -n'
+that emacshell's own `emacshell-open-terminal' issues.  Prefers
+`termux-am' (works on Android 12+); falls back to /system/bin/am
+(Android <= 11).  Signals a clear error when neither exists."
+  (let ((am (eservo-servo-android--am-executable)))
+    (unless am
+      (error "eservo-servo: no usable `am' (tried termux-am on PATH and /system/bin/am); use the adb lane: C-u M-x eservo-servo-android-start (Termux: pkg install android-tools)"))
+    (let (;; (KEY . VALUE) pairs flattened to --es KEY VALUE, in order;
+          ;; mapcan over freshly consed lists, never `apply' spreading
+          ;; onto pairs (repo bug-class law).
+          (args (append
+                 (list "start" "-n" activity)
+                 (mapcan (lambda (pair)
+                           (list "--es" (car pair) (cdr pair)))
+                         extras)))
+          (buf (generate-new-buffer " *eservo-servo-am*")))
+      (unwind-protect
+          (progn
+            ;; Spreading ARGS here is intended: it IS the argv list.
+            (unless (zerop (apply #'call-process am nil buf nil args))
+              (error "eservo-servo: `am start' failed: %s"
+                     (string-trim (buffer-string))))
+            t)
+        (kill-buffer buf)))))
+
 (defun eservo-servo-android--start-via-adb (activity extras)
   "Start the servo app ACTIVITY with EXTRAS over `adb shell am start'.
 Each (KEY . VALUE) pair of EXTRAS becomes one `--es KEY VALUE'
@@ -223,10 +271,13 @@ the servo backend on 127.0.0.1:PORT through the ordinary attach
 path -- the app's devtools server is simply the local servo.
 
 The app is started through `eservo-servo-android-start-function'.
-With \\[universal-argument] (VIA-ADB non-nil), or automatically
-when this Emacs lacks `android-start-activity' while adb is on
-PATH, the adb lane is preferred instead; a customized seam is
-never silently overridden."
+With \\[universal-argument] (VIA-ADB non-nil) the adb lane is
+forced.  Otherwise, when this Emacs lacks `android-start-activity'
+and the seam is still the default, the fallback is picked
+automatically in this order: the plain `am' lane (termux-am or
+/system/bin/am -- zero extra dependencies), then adb (needs
+android-tools and wireless-debugging pairing).  A customized seam
+is never silently overridden."
   (interactive "P")
   (require 'eservo)
   (let* ((port (or eservo-servo-port (eservo-servo--free-port)))
@@ -235,15 +286,26 @@ never silently overridden."
                            eservo-servo-android-activity))
          (extras (list (cons "servoargs"
                               (format "--devtools=%d" port)))))
-    (funcall (if (or via-adb
-                     (and (not (fboundp 'android-start-activity))
-                          (executable-find "adb")
-                          ;; Auto-fallback only from the default seam:
-                          ;; a custom start function is the user's call.
-                          (eq eservo-servo-android-start-function
-                              #'eservo-servo-android--start-via-emacs)))
-                 #'eservo-servo-android--start-via-adb
+    (funcall (cond
+              ;; C-u always means: the adb lane, explicitly.
+              (via-adb
+               #'eservo-servo-android--start-via-adb)
+              ;; A customized seam is the user's call, untouched.
+              ((not (eq eservo-servo-android-start-function
+                        #'eservo-servo-android--start-via-emacs))
                eservo-servo-android-start-function)
+              ;; Patched-Emacs primitive: the default lane.
+              ((fboundp 'android-start-activity)
+               eservo-servo-android-start-function)
+              ;; Plain `am' beats adb: no packages, no pairing.
+              ((eservo-servo-android--am-executable)
+               #'eservo-servo-android--start-via-am)
+              ;; Last resort: adb when it is at least installed.
+              ((executable-find "adb")
+               #'eservo-servo-android--start-via-adb)
+              ;; Nothing usable: run the default seam so the user gets
+              ;; its precise, actionable error message.
+              (t eservo-servo-android-start-function))
              activity extras)
     ;; Attach exactly like attach mode: loopback host + this port, then
     ;; the ordinary eservo-start wiring (driver, global, live guard).

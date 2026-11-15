@@ -99,14 +99,16 @@ Three ways up:
   (=org.servo.servoshell=) with the =servoargs= intent extra
   =--devtools=PORT= and attaches on =127.0.0.1= automatically — the
   app's devtools server is simply the local servo.  The app is
-  started through a seam (=eservo-servo-android-start-function=):
-  the patched-Emacs primitive =android-start-activity= by default
-  (stock Emacs Android does not have it), or the adb lane — =C-u M-x
-  eservo-servo-android-start= forces it, and it is picked
-  automatically when the primitive is missing and =adb= is on PATH
-  (Termux: =pkg install android-tools=, then pair/connect wireless
-  debugging so adb can reach the phone itself).  The adb lane is
-  exactly =adb shell am start -n= with the component
+  started through a seam (=eservo-servo-android-start-function=),
+  picked automatically: the patched-Emacs primitive
+  =android-start-activity= when this Emacs has it (stock Emacs
+  Android does not), else plain =am start= (=termux-am= from the
+  Termux/emacshell prefix, or =/system/bin/am=) — zero extra
+  dependencies, the same route emacshell's own terminal command
+  takes — else =adb shell am start=.  =C-u M-x
+  eservo-servo-android-start= forces the adb lane (Termux: =pkg
+  install android-tools=, then pair/connect wireless debugging so
+  adb can reach the phone itself).  Every lane uses the component
   =org.servo.servoshell/org.servo.servoshell.MainActivity= and the
   =--es servoargs "--devtools=PORT"= extra.
 - *Launch* (desktop Linux): leave =eservo-servo-port= nil; eservo
@@ -160,6 +162,29 @@ behaviour); =fill= only accepts ="text=..."= selectors; typing is
 IME-level, not React-safe; and Chromium web content often shows up as
 one big WebView node — for real site automation prefer the cdp
 backend.  Raw =(tap (X Y))= coordinates exist exactly for that case.
+
+* On a small phone (1-3 GB RAM)
+
+eservo itself is a few thousand lines of Elisp and adds no
+dependencies — the memory bill is the *browser engine*, and the
+lanes differ a lot:
+
+| Lane | Extra RAM on the phone | Notes |
+|---|---|---|
+| =adb= backend | ~none (drives apps already open) | No DOM ops; the lightest lane on 2 GB devices |
+| =servo= via the plain =am= lane | one servo app (~100-250 MB typical) | The recommended lane on a phone; zero setup in emacshell |
+| =cdp= | a Chromium (~200-400 MB) | Fine on desktop; on 2 GB phones only for short sessions |
+| =embedded= (libeservo) | servo inside the Emacs process | One heavy heap in one process; experimental v0 — not the phone answer today |
+
+Practical notes for a 2 GB device (Redmi 8A class):
+
+- Prefer =servo= over =cdp= on-device: servo is the lighter engine,
+  and the =am= lane needs no adb pairing at all.
+- Keep one backend running at a time (=eservo-stop= before
+  switching); Android's low-memory killer does not distinguish
+  "Emacs + servo" from bloat.
+- Simple pages (logins, forms, read-only automation) are the sweet
+  spot; heavy SPAs will swap on 2 GB regardless of the engine.
 
 * Logging in once per site (chat.qwen.ai, z.ai, ...)
 

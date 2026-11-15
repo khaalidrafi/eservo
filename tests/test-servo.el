@@ -474,5 +474,100 @@ argument -- the repo's `apply' bug class -- cannot pass unnoticed."
                                  (error-message-string err)))
          (should (string-match-p "adb" (error-message-string err))))))))
 
+
+;; ----- the plain `am' lane (Android without adb) -----------------------
+
+(defun eservo-servo-test--with-am-stub (body-fn)
+  "Call BODY-FN with termux-am/adb on PATH and `call-process' faked.
+Return the recorded (PROGRAM . ARGS) calls, newest first; every call
+exits 0.  `/system/bin/am' is pointed at a fake executable file so
+the am resolution is exercised for real."
+  (let (calls
+        (fake-am (make-temp-file "eservo-fake-am")))
+    ;; make-temp-file creates the file; give it an empty content -- only
+    ;; its existence+executability matters to the resolver.
+    (let (process-file-side-effects)
+      (cl-letf (((symbol-function 'executable-find)
+                 ;; `executable-find' takes (NAME &optional REMOTE).
+                 (lambda (name &optional _remote)
+                   (cond ((string= name "termux-am") "/fake/bin/termux-am")
+                         ((string= name "adb") "/fake/bin/adb")
+                         (t nil))))
+                ((symbol-function 'file-executable-p)
+                 (lambda (file &optional _group)
+                   (or (string= file "/system/bin/am")
+                       (file-executable-p file))))
+                ((symbol-function 'call-process)
+                 (lambda (program _infile _buffer _display &rest args)
+                   (push (cons program args) calls)
+                   0)))
+        (funcall body-fn)))
+    calls))
+
+(ert-deftest eservo-servo-android-am-start-via-am-command ()
+  "The am lane runs `am start -n PKG/ACTIVITY' with --es extras."
+  (let (calls)
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (name &optional _remote)
+                 (when (string= name "termux-am") "/fake/bin/termux-am")))
+              ((symbol-function 'file-executable-p)
+               (lambda (file &optional _group)
+                 (not (string= file "/system/bin/am"))))
+              ((symbol-function 'call-process)
+               (lambda (program _infile _buffer _display &rest args)
+                 (push (cons program args) calls)
+                 0)))
+      (should (eq (eservo-servo-android--start-via-am
+                   "org.servo.servoshell/org.servo.servoshell.MainActivity"
+                   '(("servoargs" . "--devtools=6080")))
+                  t)))
+    (should (equal (car (car calls)) "/fake/bin/termux-am"))
+    (should (equal (cdr (car calls))
+                   (list "start" "-n"
+                         "org.servo.servoshell/org.servo.servoshell.MainActivity"
+                         "--es" "servoargs" "--devtools=6080")))))
+
+(ert-deftest eservo-servo-android-am-start-errors-without-am ()
+  "No termux-am and no /system/bin/am: a clear error naming the lanes."
+  (cl-letf (((symbol-function 'executable-find)
+             (lambda (_name &optional _remote) nil))
+            ((symbol-function 'file-executable-p)
+             (lambda (file &optional _group)
+               (not (string= file "/system/bin/am")))))
+    (let ((err (should-error (eservo-servo-android--start-via-am
+                              "org.servo.servoshell/org.servo.servoshell.MainActivity"
+                              nil))))
+      (should (string-match-p "termux-am"
+                              (error-message-string err)))
+      (should (string-match-p "adb"
+                              (error-message-string err))))))
+
+(ert-deftest eservo-servo-android-start-am-lane-when-no-primitive ()
+  "Stock Emacs (no primitive) + am usable: the am lane starts the app."
+  (eservo-servo-test--with-fake
+   (lambda (port)
+     (let ((eservo--current-driver nil)
+           (eservo-servo-port port))
+       (eservo-servo-test--with-primitive
+        nil
+        (lambda ()
+          (let ((calls
+                 (eservo-servo-test--with-am-stub
+                  (lambda ()
+                    (unwind-protect
+                        (progn
+                          (eservo-servo-android-start)
+                          (should (and eservo--current-driver
+                                       (eservo-backend-call eservo--current-driver
+                                                            'alive-p))))
+                      (eservo-stop))))))
+            ;; termux-am was used, NOT adb: no "shell" prefix anywhere.
+            (should (equal (car (car calls)) "/fake/bin/termux-am"))
+            (should (equal (cdr (car calls))
+                           (list "start" "-n"
+                                 "org.servo.servoshell/org.servo.servoshell.MainActivity"
+                                 "--es" "servoargs"
+                                 (format "--devtools=%d" port)))))))))))
+
 (provide 'test-servo)
 ;;; test-servo.el ends here
