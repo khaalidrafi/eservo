@@ -1,0 +1,67 @@
+#+TITLE: SPEC 0030 — S0.3 Session / cookie spike
+#+OPTIONS: toc:1
+
+* Question
+
+Does a servo session have a *persistent identity* — do cookies survive
+a full process restart via =Opts.config_dir= — and can an embedder
+inspect/clear them via =SiteDataManager=?
+
+Depends on: 0010 harness. This is the make-or-break of the owner's
+"log into chat.qwen.ai / z.ai" priority.
+
+* Approach
+
+- Local test server (committed, e.g. a tiny Python =http.server= or
+  Rust handler under =evidence/s0.3/=) that:
+  - sets a persistent cookie (=Set-Cookie: sid=…; Max-Age=3600=),
+  - sets a session cookie (no Max-Age),
+  - echoes received =Cookie= headers and a body that renders them.
+- Extend the 0010 example (=cookie_persistence=):
+  1. run with =Opts.config_dir= = /tmp/eservo-s03-profile (fresh),
+  2. load the test page; verify the page body shows the cookie echoed
+     back (or use =SiteDataManager::cookies_for_url=),
+  3. exit the process cleanly,
+  4. re-run with the SAME config_dir; assert the persistent cookie is
+     sent and the session cookie is NOT (if servo persists session
+     cookies too, document the divergence),
+  5. call =clear_cookies= / =clear_session_cookies= on a third run;
+     assert via =cookies_for_url=.
+- Record where on disk the profile writes (tree of config_dir after
+  run) → resolves V-S2.
+
+* Acceptance criteria
+
+- AC1 :: *Given* a fresh profile dir, *when* the cookie-setting page
+  is visited, *then* =cookies_for_url= returns the cookie in-process.
+- AC2 :: *Given* a process restart with the same profile dir, *when*
+  the page is revisited, *then* the persistent cookie is still sent
+  (server echo proves it) — identity survives restart.
+- AC3 :: *Given* the same restart, *then* the session cookie's fate
+  (expected: gone) is documented either way.
+- AC4 :: *Given* =clear_cookies= invoked, *then* =cookies_for_url=
+  returns empty and the on-disk jar reflects it (path documented).
+- AC5 :: *Given* the run, *then* =evidence/s0.3/= contains: profile
+  dir listing, server log of Cookie headers per request, run logs.
+
+* Fail conditions
+
+- config_dir ignored for cookies (nothing on disk / nothing restored)
+  → investigate storage prefs; if truly unsupported at embedding
+  level, that blocks the "accounts" priority for the in-process option
+  and must be re-tested against servoshell (its profile behavior) —
+  record and escalate to REVIEW queue immediately.
+- Cookies persist only within same process lifetime → same escalation.
+
+* Risks
+
+- Servo storage may be gated behind prefs (e.g. dom storage toggles).
+- Multiprocess mode may change profile layout — pin one mode for the
+  spike, note the other as VERIFY.
+- Real-world login (qwen/z.ai) is explicitly OUT of scope here; it is
+  Phase 1 stretch (anti-bot fingerprint risk, V-S9).
+
+* Out of scope
+
+WebDriver cookie commands (V-S1), real accounts, encryption of the jar
+at rest (later: file permissions only for v1; note in CHARTER review).

@@ -1,0 +1,87 @@
+#+TITLE: RESEARCH — TTY rendering (verified 2026-11-15)
+#+OPTIONS: toc:1
+
+Question: how hard is it to show servo-rendered pixels inside =emacs -nw=?
+
+* Mainline Emacs: NO terminal image display (verified)
+
+- Verified via the Emacs git tree (mirror =emacs-mirror/emacs=, branch
+  =master=, fetched 2026-11-15):
+  - =etc/NEWS= (changes in Emacs 32, in development): zero matches for
+    sixel; "kitty" appears ONLY as the *Kitty Keyboard Protocol*
+    (=tty-use-kitty-kbd-proto=) — keyboard input, not graphics. Also
+    notable: child frames now work in text-mode frames.
+    https://github.com/emacs-mirror/emacs/blob/master/etc/NEWS
+  - =etc/NEWS.31= (Emacs 31): no sixel, no kitty-graphics, no terminal
+    image entries (image-related entries are GUI: SVG fill, image-dired,
+    SHR slicing).
+    https://github.com/emacs-mirror/emacs/blob/master/etc/NEWS.31
+  - =etc/NEWS.30= (Emacs 30): no terminal image support either.
+    https://github.com/emacs-mirror/emacs/blob/master/etc/NEWS.30
+- ⇒ "Emacs 31 =image= works on terminal" is FALSE per NEWS. Any TTY
+  image story is third-party or future.
+
+* Third-party terminal graphics for Emacs (verified)
+
+- =kitty-graphics.el= — https://github.com/cashmeredev/kitty-graphics.el
+  (README verified 2026-11-15): "Display images, video, and scaled text
+  directly in terminal Emacs (emacs -nw) using the Kitty graphics
+  protocol or Sixel." Details:
+  - Auto backend pick: Kitty first (=$KITTY_PID= probe), then Sixel.
+  - Works in tmux (kitty graphics via DCS passthrough; sixel native on
+    tmux ≥ 3.4).
+  - Integrates with Emacs' *overlay display engine* (images scroll with
+    text, split windows OK) — this is the integration point eservo
+    needs.
+  - Terminals: Kitty ≥ 0.20, WezTerm, Ghostty (kitty); foot, Konsole,
+    xterm +sixel, mlterm, mintty, Windows Terminal, VS Code terminal
+    (sixel).
+  - Sixel encoders: recommends =img2sixel= from
+    [[https://github.com/saitoha/libsixel][libsixel]] (~10x faster than
+    ImageMagick fallback).
+  - Also does org-mode inline images, LaTeX preview, eww/shr images —
+    i.e. it hooks the standard image display pipeline, which is what a
+    servo frame buffer would ride.
+- =sixel-graphics.el= — https://github.com/timfel/sixel-graphics.el
+  (older, 1 star): "Display images in terminal Emacs (emacs -nw) via
+  the Sixel graphics protocol."
+- libsixel — https://github.com/saitoha/libsixel (encoder dependency).
+
+* Emacs 32 (dev): canvas images — watch this (verified)
+
+=etc/NEWS= (Emacs 32 dev) adds:
+#+begin_quote
+** Support for canvas image objects.
+Canvas images support efficient updating and refreshing. An image
+specifier with type 'canvas' creates a canvas image. The canvas has an
+associated writable pixel buffer. The dynamic module function
+'canvas_data' provides access to the pixel buffer. After changing the
+':data' vector or writing to the pixel buffer, a call to
+'canvas-refresh' redraws the canvas image.
+#+end_quote
+https://github.com/emacs-mirror/emacs/blob/master/etc/NEWS
+⇒ A *dynamic-module-oriented writable pixel buffer* is exactly the fast
+path a servo frame pump wants (no PNG encode per frame). Dev-only
+today; do not build on it yet; revisit when Emacs 32 ships. =VERIFY=
+release timeline.
+
+* Consequences for eservo
+
+1. TTY phase must depend on a third-party graphics package
+   (kitty-graphics.el-class) + terminal capability detection.
+2. Frame pump for TTY v0: servo =RgbaImage= → PNG (or raw) →
+   package/encoder → terminal. Latency unknown ⇒ S0.4 measures it.
+   Slideshow fps is ACCEPTABLE for scripting/agent use (the page text
+   is available via extraction; pixels are for the human).
+3. Text-first fallback: when the terminal cannot do graphics, eservo
+   degrades to link/title/accessibility text + step log, never "broken".
+4. Long-term: if Emacs 32 canvas lands, a module could write servo
+   frames directly into the canvas pixel buffer (single process, no
+   encode). Track it.
+
+* Open VERIFY items
+
+- kitty-graphics.el refresh latency at 1024×768 / 640×480 (S0.4).
+- Behavior inside tmux on target machines.
+- Whether raw sixel emission from our own encoder beats
+  package-mediated display (only if S0.4 is too slow).

@@ -1,0 +1,74 @@
+#+TITLE: RESEARCH — Android display path (verified 2026-11-15)
+#+OPTIONS: toc:1
+
+Question: can an offscreen servo surface be shown *inside Emacs on
+Android*, and can the same elisp drive it?
+
+* Emacs on Android exists and displays images (verified)
+
+- Emacs 30 NEWS: "Emacs has been ported to the Android operating
+  system. This requires Emacs to be compiled on another computer."
+  https://github.com/emacs-mirror/emacs/blob/master/etc/NEWS.30
+- Official prebuilt APKs ship at
+  https://ftp.gnu.org/gnu/emacs/android/README
+  (README fetched 2026-11-15 via the kernel.org GNU mirror
+  https://mirrors.kernel.org/gnu/emacs/android/README — ftp.gnu.org
+  itself was unreachable from the research sandbox):
+  - =emacs-3*.*-16-armeabi-v7a.apk= — armv7, Android 4.1+
+  - =emacs-3*.*-24-armeabi-v7a.apk= — armv7, Android 7.0+
+  - =emacs-3*.*-21-arm64-v8a.apk= — arm64, Android 5.0+
+  - a Termux-flavored build is also provided (see README section 25 on
+    signature conflicts).
+- The Emacs manual has an "Emacs and Android" appendix
+  (=doc/emacs/android.texi= in-tree; rendered node:
+  https://www.gnu.org/software/emacs/manual/html_node/emacs/Android.html
+  — gnu.org was unreachable from the sandbox; content verified from
+  the texi source). Covers Android startup, windowing, fonts,
+  environment, troubleshooting.
+- Images: the release README states the display surface provided to
+  Emacs is "always color" (grayscale/e-ink display quirks are handled
+  below Emacs), i.e. the standard image pipeline renders normally.
+  SVG-with-embeds support is documented in the manual appendix.
+- Touchscreen: Emacs 30 NEWS documents touch gestures on X, Android,
+  PGTK, MS-Windows — input plumbing for a touch-driven browser buffer
+  exists at the Emacs level.
+
+* Realistic v0 for eservo on Android (owner-approved direction)
+
+Offscreen servo surface → =RgbaImage=/PNG → =create-image= /
+=insert-image= in an ordinary Emacs buffer on Android. No special
+Emacs APIs needed: this is the *same* display path as Phase 1 Linux
+GUI, just on the Android window system. Confirm with a spike inside
+Phase 3 (open a PNG in emacs-on-android — trivial smoke test).
+
+* Driving Android Emacs from Linux (verified)
+
+- Emacs 30 NEWS: new TRAMP connection method =androidsu= ("android su
+  for Android devices") — remote control of the Android Emacs instance
+  from a desktop is a supported pattern (adb-based).
+  https://github.com/emacs-mirror/emacs/blob/master/etc/NEWS.30
+
+* The hard part: where does servo run on Android?
+
+- Servo itself builds for Android (upstream README has an Android
+  section with ANDROID_SDK_ROOT / ANDROID_NDK_ROOT instructions):
+  https://github.com/servo/servo/blob/main/README.md
+- Option A (in-process): Emacs dynamic module (.so) cross-compiled
+  with the NDK, embedding libservo. Precedent for *Emacs* dynamic
+  modules on Android: =VERIFY= (not found in android.texi / NEWS;
+  questions.org). If modules load, this is one .so from the same
+  source as the Linux module.
+- Option B (process): an Android servo helper binary (or
+  =servoshell --headless --webdriver=) + IPC over TCP/adb; Emacs side
+  is pure elisp. Lower integration risk; keeps Emacs APK stock.
+- Option C: servo runs on the *desktop* (Linux), Emacs on Android
+  connects over TRAMP/TCP — degenerate but useful for early dogfood.
+
+* Open VERIFY items (collected in questions.org)
+
+- Loading NDK-built dynamic modules in the official Android Emacs APK.
+- =SoftwareRenderingContext= (surfman software adapter) on Android —
+  which software GL backend exists there; if none, option B on-device
+  or option C initially.
+- APK-side storage layout for profile dirs / cookie jar
+  (user-emacs-directory on Android).

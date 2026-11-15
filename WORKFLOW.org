@@ -1,0 +1,65 @@
+#+TITLE: eservo WORKFLOW — async review-later protocol
+#+OPTIONS: toc:1
+
+Mirrors team law: *humans review later, agents verify now.*
+
+* Branches & commits
+
+- All work lands on =ai/main= in *small* commits (one question, one
+  spike, one doc per commit when practical).
+- The initial scaffold (this repo state) is deliberately *uncommitted*:
+  the first working agent commits it wholesale as
+  =scaffold: eservo research-phase skeleton= and tags the REVIEW queue.
+- No force-push, no history rewrite once reviewed.
+
+* Evidence rule (per commit)
+
+Every non-trivial commit message body carries:
+- WHAT question it answers,
+- EVIDENCE: artifact path (=evidence/…=, =RESEARCH/…=) or upstream URL,
+- VERIFY list for anything still open.
+
+Claims about Servo/Emacs APIs without a URL or artifact are review
+blockers. Never invent servo APIs — check
+RESEARCH/servo-embedding.org first; if absent, verify against upstream
+before writing.
+
+* Verification discipline (agents, now)
+
+- Spikes must produce artifacts: PNGs, logs, timings, command
+  transcripts. A spike that fails still commits its failure log.
+- Research notes carry a *fetched-on date* + exact URLs.
+- Unverified statements get the literal marker =VERIFY= (see
+  RESEARCH/questions.org for the open list).
+
+* REVIEW queue (humans, later)
+
+| ID  | Date       | Area            | Item                                            | Evidence                    | Reviewer | Status    |
+|-----+------------+-----------------+-------------------------------------------------+-----------------------------+----------+-----------|
+| R-1 | 2026-11-15 | scaffold        | Initial repo skeleton + research notes          | RESEARCH/*.org (URLs)       | owner    | QUEUED    |
+| R-2 | 2026-11-15 | research        | Verdict: no CDP in servo today; WebDriver is    | RESEARCH/servo-embedding.org| owner    | QUEUED    |
+|     |            |                 | the only wire protocol shipped                  | (issues #18133, #42766)     |          |           |
+| R-3 | 2026-11-15 | roadmap         | Phase 0 spike set + transport decision deferred | ROADMAP.org, specs/         | owner    | QUEUED    |
+| R-4 | TBD        | spike S0.1      | offscreen render PNG + build recipe             | evidence/s0.1/              | owner    | NOT STARTED |
+| R-5 | TBD        | spike S0.2      | input injection log                             | evidence/s0.2/              | owner    | NOT STARTED |
+| R-6 | TBD        | spike S0.3      | cookie persistence across restart               | evidence/s0.3/              | owner    | NOT STARTED |
+| R-7 | TBD        | spike S0.4      | tty frame latency numbers                       | evidence/s0.4/              | owner    | NOT STARTED |
+
+Add rows, never edit history. Status ∈ QUEUED / APPROVED / CHANGES /
+REJECTED (with one-line reason).
+
+* Elisp quality bar (sandbox note)
+
+- *No Emacs exists in this sandbox* → byte-compilation is NOT required
+  for =elisp/eservo.el= until an environment provides it.
+- Discipline instead: balanced parens, =checkdoc=-style docstrings,
+  no suspected free variables; first Emacs-equipped agent runs
+  =byte-compile-file= and fixes warnings before Phase 1 merges.
+- =elisp/eservo.el= is a *design stub*: it must load-fail loudly
+  (backend signals) rather than pretend to work.
+
+* Rust quality bar
+
+- =rust/= is a workspace skeleton; crates must always =cargo check=
+  clean. The servo git dependency is intentionally absent until
+  specs/0010 runs (see rust/Cargo.toml comment).

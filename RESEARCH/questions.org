@@ -1,0 +1,60 @@
+#+TITLE: RESEARCH — Open questions (VERIFY list)
+#+OPTIONS: toc:1
+
+Every item here is UNVERIFIED on purpose. Rule: an item leaves this
+file only with a URL or a committed artifact (spike evidence). Never
+resolve by assumption.
+
+* Servo
+
+- V-S1 :: Does servo's WebDriver server implement cookie/storage
+  commands (W3C "Get All Cookies", "Add Cookie")? Relevant to Option B
+  session control. Check =components/webdriver_server= handlers.
+- V-S2 :: What exactly does =Opts.config_dir= persist (cookie jar
+  path/format, storage shards)? → S0.3 artifact.
+- V-S3 :: Which software GL backend does surfman's
+  =create_software_adapter= use on a given distro (OSMesa?) and is it
+  installable on the S0.1 box / CI? → S0.1 build log.
+- V-S4 :: Field-level construction of =KeyboardEvent= / =MouseButtonEvent=
+  / =MouseMoveEvent= (modifiers, key codes, location) — read
+  =input_events.rs= fully during S0.2; verify against
+  =keyboard-types= re-exports.
+- V-S5 :: Coordinate spaces: device px vs CSS px under hidpi for
+  =notify_input_event= targets. → S0.2.
+- V-S6 :: Behavior of =WebView::evaluate_javascript= return values
+  (=JSValue= serialization) for strings/objects. → S0.2.
+- V-S7 :: Can =set_accessibility_active= + accesskit tree serve as the
+  text/selector extraction layer for =wait-for= / =expect= / =extract=?
+  Or is JS-eval + querySelector the pragmatic v1? → Phase 4 decision.
+- V-S8 :: servo build time / disk footprint for the =servo= git dep at
+  a pinned rev on the team's weakest CI machine. → S0.1.
+- V-S9 :: Anti-bot behavior of chat.qwen.ai / z.ai under servo's
+  fingerprint (UA, headers, TLS) for real logins. → Phase 1 stretch;
+  needs live test with persistent profile.
+- V-S10 :: Licensing check for linking servo (MPL-2.0) into a GPL-ish
+  Emacs module distribution — believed fine (MPL2 is GPL-compatible),
+  but get an explicit owner sign-off. =VERIFY=.
+
+* Emacs
+
+- V-E1 :: Do dynamic modules load in the official Android Emacs APK
+  (NDK-built .so)? Not found in android.texi/NEWS. Probe on device or
+  find upstream statement.
+- V-E2 :: Does =kitty-graphics.el= (cashmeredev) refresh fast enough
+  for a servo frame pump (1024×768, ≥0.5 fps)? → S0.4.
+- V-E3 :: Emacs 32 canvas images (=canvas_data=, =canvas-refresh=)
+  release timeline; would change Option A's frame path. Track NEWS.
+- V-E4 :: =xwidget-webkit= availability matrix (X only? PGTK?) — only
+  matters if Option C is ever revisited; texi verified, matrix not.
+- V-E5 :: No Emacs in this sandbox: =elisp/eservo.el= is un-byte-compiled
+  by design until an Emacs-equipped agent runs
+  =batch-byte-compile= and fixes warnings (see WORKFLOW.org).
+
+* Process / project
+
+- V-P1 :: Details of the two REJECTED eservo proposals are unavailable
+  to this seat. Owner: drop 5 lines into RESEARCH/questions.org on
+  what killed them, so Phase 0 can falsify those specific concerns.
+- V-P2 :: Team evidence dir convention: this scaffold assumes
+  =evidence/s0.N/= artifacts committed alongside specs; confirm or
+  rename at first review (REVIEW R-1).

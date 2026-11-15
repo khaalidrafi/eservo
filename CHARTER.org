@@ -1,0 +1,88 @@
+#+TITLE: eservo CHARTER
+#+OPTIONS: toc:1
+
+* What eservo IS
+
+- An Emacs surface for web automation with MULTIPLE backends behind one
+  API (the repo's landed architecture):
+  - Chromium/Chrome over CDP on Linux (GUI and =emacs -nw= TTY),
+  - Android device browsers over adb,
+  - embedded Servo via the =libeservo= dynamic module (native/) —
+    servo inside the Emacs process; Servo has no CDP, so this lane
+    rides the module boundary instead (RESEARCH/servo-embedding.org).
+- A *deterministic* scripting API in elisp: navigate, click, fill,
+  wait-for, expect, extract, screenshot, submit — with a step log.
+- A *session* model: named sessions with a persistent profile dir +
+  cookie jar, so account logins (chat.qwen.ai, z.ai) survive restarts.
+- A *drivable* surface: the same API an interactive user has is callable
+  by an agent (program) — with observable, replayable step results.
+  =M-x eservo-agent-brief= exports the whole tool menu + live snapshot
+  for any web/cloud agent: the Emacs-native answer to browser-use /
+  cua-driver.
+
+* What eservo is NOT
+
+- Not a fork of Servo; not vendoring Servo.
+- Not Servo-over-CDP: Servo has no CDP today (RESEARCH/
+  servo-embedding.org); the CDP client (eservo-cdp.el) speaks to
+  CHROMIUM, and the Servo lane goes through the embedded module
+  instead. No new CDP-for-servo assumptions.
+- Not an AI agent. No model calls in the core. AI callers are *clients*.
+- Not an xwidget/webview wrapper (that alternative is evaluated and
+  rejected as primary path in RESEARCH/alternatives.org, kept as
+  fallback context).
+- Not a big-bang rewrite. Every phase must end with runnable evidence.
+
+* Success criteria per owner priority
+
+** Linux
+- =M-x eservo-open https://example.com= renders a live page into an
+  Emacs buffer on Linux (GUI build first).
+- Keyboard + mouse input round-trips into the page.
+- Repaint is visible without user action (even 1–2 fps is a pass for
+  v1); a step log timestamp proves frame cadence.
+
+** TTY
+- The same page renders in =emacs -nw= on a sixel- or kitty-graphics
+  capable terminal (e.g. foot, kitty, WezTerm, Ghostty).
+- No GUI Emacs process required; the pipeline degrades to fewer colors
+  / lower fps, never to "unsupported".
+
+** Android
+- The same page renders in an Emacs buffer inside GNU Emacs on Android
+  (official prebuilt APK acceptable) using the standard image display
+  path (RESEARCH/android-display.org).
+- The session/profile dir lives under Emacs' user-emacs-directory on
+  Android storage.
+
+** Account login (persistent identity)
+- A named session has: profile dir + cookie jar on disk.
+- Logging into a test site once (S0.3) and into chat.qwen.ai / z.ai
+  (Phase 1 stretch, live anti-bot risk documented) survives a *full
+  engine restart*.
+- =eservo-session-cookies= can list and clear cookies for a session
+  (via Servo's SiteDataManager surface or equivalent).
+
+** Agentic driving
+- An external agent can run any =eservo-script= and receive structured
+  per-step results (status, elapsed, evidence) without touching
+  internals.
+- Every script run leaves an inspectable step log (buffer + file).
+- No AI is required to *execute* a script.
+
+** No-AI task scripting
+- The scripting API covers: navigate / click / fill / wait-for / expect
+  / extract / screenshot / submit (sketched in elisp/eservo.el).
+- At least one end-to-end deterministic script runs headless:
+  "login-and-prompt-qwen" (commented sketch exists; real wiring is
+  Phase 4).
+- Scripts fail loudly: a step that does not meet its =expect= aborts
+  the run with evidence, never silently continues.
+
+* Review law for this repo
+
+- Humans review later; agents verify *now*: every claim carries a URL
+  or an artifact path. Unverified → =VERIFY= marker, never prose that
+  sounds certain.
+- Two prior eservo proposals were rejected. Therefore: small, falsifiable
+  steps; a spike that fails with evidence is a *success* of the process.

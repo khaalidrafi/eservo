@@ -1,0 +1,117 @@
+#+TITLE: RESEARCH — Architecture alternatives (evidence-based, no crowning)
+#+OPTIONS: toc:1
+
+Context: two earlier eservo proposals were REJECTED. This note exists
+to lay out honest trade-offs and let Phase 0 spikes pick, not rhetoric.
+
+Verified facts it rests on (details + URLs in servo-embedding.org):
+- libservo embedding path exists: SoftwareRenderingContext (headless
+  pixels), WebView::notify_input_event (input),
+  evaluate_javascript, take_screenshot, SiteDataManager,
+  Opts.config_dir.
+- servo-capi provides a C-ABI wrapper (no input-event export yet).
+- servoshell TODAY runs headless with =--webdriver= and =-o shot.png=.
+- Servo has NO CDP (closed WIP #18133; BiDi still open #42766).
+- Mainline Emacs has no TTY images (third-party sixel/kitty packages);
+  Emacs 32 dev adds canvas pixel buffers for dynamic modules.
+
+* Option A — Emacs dynamic module embedding servo (in-process)
+
+Rust module (crate =emacs-module-rs=, verified:
+https://github.com/ubolonton/emacs-module-rs) links the =servo= crate
+directly; Emacs loads one .so.
+
+- Pros:
+  - Zero-copy-ish frame path (RgbaImage → image data → Emacs); with
+    Emacs 32 canvas: direct pixel-buffer writes.
+  - Full libservo API: input injection, JS eval, cookies, auth-delegate
+    dialogs — no wire protocol needed.
+  - One language, one process, no port management.
+- Cons:
+  - Servo expects an embedder event loop (=EventLoopWaker= +
+    =spin_event_loop=) that must coexist with Emacs' loop — threading
+    design risk (module must never block Emacs).
+  - A servo panic takes Emacs down with it.
+  - Build weight: servo is a giant workspace; every Emacs/user needs a
+    matching toolchain. Version pinning discipline required (API churn
+    signals in-tree).
+  - Android: NDK cross-compile of the module = VERIFY.
+  - servo-capi exists but lacks input events; we'd wrap Rust directly.
+- Spike that decides: S0.1 (+ a mini "loop integration" spike inside
+  Phase 1 gate).
+
+* Option B — servo helper process + IPC (out-of-process)
+
+A small Rust embedder binary (S0.1 harness, grown up) owned by eservo,
+talking to Emacs over stdio/LocalSocket/TCP with a JSON protocol we
+define. Floor case: stock =servoshell --headless --webdriver 7000=
+driven from elisp via W3C WebDriver (zero new servo code).
+
+- Pros:
+  - Crash isolation (engine dies, Emacs lives); restart-able sessions.
+  - Stock Emacs (no module loading, no ABI issues, works over TRAMP =
+    Android-from-Linux story for free).
+  - WebDriver floor exists TODAY (S0.5); upgrade path = richer IPC
+    (screenshots, JS eval, cookies) with the same process model.
+  - Same binary can run on-device (Android) or remote.
+- Cons:
+  - Wire protocol work: frames as base64/PNG over IPC; latency per
+    frame; input marshalling.
+  - WebDriver's suitability for *interactive* driving (latency) and its
+    cookie-command coverage = VERIFY.
+  - Two processes to install/orchestrate.
+
+* Option C — built-in xwidget-webkit (not servo; baseline)
+
+Emacs ships =xwidget-webkit-browse-url= (WebKitGTK) on X builds —
+verified in =doc/emacs/misc.texi= (Xwidgets section:
+=xwidget-webkit-browse-url=, =xwidget-webkit-edit-mode=, history,
+JS toggle):
+https://github.com/emacs-mirror/emacs/blob/master/doc/emacs/misc.texi
+(rendered manual node:
+https://www.gnu.org/software/emacs/manual/html_node/emacs/Xwidgets.html
+— gnu.org unreachable from sandbox; texi source verified).
+
+- Pros: zero new code; real WebKit.
+- Cons: X11/GTK only — dead on TTY and Android (the owner's explicit
+  targets); webkit2gtk dependency outside our control; no offscreen
+  pixel control; not servo.
+- Role: reference point for UX expectations, not a path.
+
+* Option D — generic webview wrappers (wry & friends)
+
+=wry= (verified: https://github.com/tauri-apps/wry) wraps
+platform webviews (WebKitGTK/WebView2/WKWebView) for app frameworks.
+
+- Pros: maintained, cross-platform.
+- Cons: platform-webview dependent — no TTY, no Android-Emacs story,
+  engine not servo, no embedding control. Same rejection as C.
+
+* Comparison (honest, unscored)
+
+| Dimension                | A module        | B process+IPC   | C xwidget | D wry    |
+|--------------------------+-----------------+-----------------+-----------+----------|
+| Offscreen pixels         | native          | IPC marshalling | no        | no       |
+| Input injection          | native          | protocol        | built-in  | built-in |
+| TTY reach                | yes (via pkg)   | yes (via pkg)   | no        | no       |
+| Android reach            | VERIFY (NDK)    | yes (TCP/adb)   | no        | VERIFY   |
+| Crash isolation          | none            | good            | n/a       | n/a      |
+| Build/install weight     | heavy           | medium          | none      | medium   |
+| Engine control (servo)   | full            | full            | none      | none     |
+| Works over TRAMP         | no              | yes             | no        | no       |
+| Exists today without R&D | no              | floor: yes (S0.5) | yes    | yes      |
+
+* Decision procedure (pre-registered, to avoid a third rejection)
+
+1. Run S0.1–S0.3 (they are transport-agnostic: they prove servo
+   capabilities through a plain Rust harness).
+2. Run S0.5 (WebDriver floor) and S0.4 (TTY latency).
+3. Gate: if S0.1 harness renders < 2 s first-frame and input/cookies
+   pass, A and B are both viable → decide on Emacs-integration risk
+   (loop coexistence, Android modules) with one extra loop-integration
+   spike; if servo build/loop integration proves hostile, B is the
+   default and A remains a later optimization behind the same elisp
+   API.
+4. The elisp API (elisp/eservo.el) is written transport-agnostic
+   (=eservo-backend-call= dispatch) so this decision does not leak
+   into user-facing scripts.

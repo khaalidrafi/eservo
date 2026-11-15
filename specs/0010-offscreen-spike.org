@@ -1,0 +1,73 @@
+#+TITLE: SPEC 0010 — S0.1 Offscreen render spike
+#+OPTIONS: toc:1
+
+* Question
+
+Can the =servo= crate, embedded as a library in our own Rust binary,
+render a real https page into an in-memory image (no window), on this
+team's Linux box, at a pinned revision?
+
+* Approach
+
+- Add to =rust/eservo-core= an example =offscreen_screenshot= that:
+  1. adds the git dependency
+     #+begin_src toml
+     servo = { git = "https://github.com/servo/servo", rev = "<PIN>" }
+     #+end_src
+     behind cargo feature =spike-servo= (kept OFF by default so the
+     workspace still builds without the servo toolchain — see
+     rust/Cargo.toml comment),
+  2. builds =Servo= via =ServoBuilder::default().event_loop_waker(..).build()=
+     (waker = thread channel tick, per the upstream
+     =components/servo/examples/winit_minimal.rs= recipe),
+  3. creates a =SoftwareRenderingContext::new(1024x768)= (headless,
+     surfman software adapter),
+  4. creates a =WebView= via =WebViewBuilder= with a =WebViewDelegate=
+     that records =notify_new_frame_ready=,
+  5. =webview.load("https://example.com")=, pumps
+     =servo.spin_event_loop()= until load + first frame,
+  6. writes the frame: =webview.take_screenshot(None, ..)= → save PNG
+     (fallback: =rendering_context.read_to_image(..)=),
+  7. prints: servo rev, time-to-first-frame, total wall time.
+- Artifacts to =evidence/s0.1/= : PNG, run log, =Cargo.lock= excerpt,
+  rustc/toolchain versions.
+
+* Acceptance criteria
+
+- AC1 :: *Given* a Linux dev box with Rust, *when* the committed
+  recipe (exact commands) is followed, *then* the example builds
+  against the pinned servo rev (or fails with a committed, reproducible
+  error — that is a valid spike outcome, recorded, and this spec moves
+  to BLOCKED for the module option).
+- AC2 :: *Given* a successful build, *when* run with network access,
+  *then* a PNG ≥ 1024x768 is written whose pixel variance is non-zero
+  (not a blank frame) — verified by a tiny check script committed with
+  the spike.
+- AC3 :: *Given* the PNG from AC2, *then* the run log contains the
+  servo rev, time-to-first-frame, and total time.
+- AC4 :: *Given* the same binary run twice against the same URL,
+  *then* both runs produce PNGs (determinism NOT required; stability
+  of the pipeline is).
+
+* Fail conditions (any of these = spike "succeeded at failing")
+
+- servo git dep does not build on stable/nightly at pin → record error
+  + toolchain; try NDK note for Android later.
+- SoftwareRenderingContext fails to create (no software GL) → record
+  distro + fix (OSMesa install) or mark V-S3 harder.
+- take_screenshot never fires callback within 60 s → record; try
+  read_to_image path; if both fail, that is evidence against the
+  in-process option.
+
+* Risks
+
+- Build weight of the servo workspace (disk, time) — measure, don't
+  guess (feeds V-S8).
+- API churn between servo revs — pin everything.
+- Multiprocess feature default may complicate embedding; example
+  should build with servo default features first, then minimal set.
+
+* Out of scope
+
+Input injection (0020), cookies (0030), Emacs integration, TTY, fps
+beyond first-frame timing.

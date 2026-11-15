@@ -1,0 +1,240 @@
+#+TITLE: RESEARCH — Servo embedding (verified 2026-11-15)
+#+OPTIONS: toc:1
+
+All facts verified against https://github.com/servo/servo branch =main=
+and https://book.servo.org / https://servo.org on 2026-11-15, by direct
+file fetch. Unverified items are marked =VERIFY= and collected in
+questions.org.
+
+* Repo / workspace reality
+
+- Default branch =main=; workspace members (root =Cargo.toml=):
+  =ports/servoshell= (the default member), =components/servo=,
+  =ffi/capi=, =tests/capi=, plus =components/{media/examples,svg,xpath}=
+  and =tests/unit/*=.
+  https://github.com/servo/servo/blob/main/Cargo.toml
+- The embeddable engine crate is package =servo= (lib name =servo=,
+  crate-type rlib) at =components/servo= — this is "libservo" in
+  practice. Feature =multiprocess= gates =servo::run_content_process=.
+  https://github.com/servo/servo/blob/main/components/servo/Cargo.toml
+- Embedder-facing traits live in package =servo-embedder-traits=
+  (lib =embedder_traits=) at =components/shared/embedder=:
+  =EmbedderMsg=, =EventLoopWaker=, =RefreshDriver=, =InputEvent=, …
+  https://github.com/servo/servo/tree/main/components/shared/embedder
+- There is NO top-level =examples/= dir and NO =servo/rust-example=
+  repo (both 404 as of fetch date). The in-tree embedding example is:
+  =components/servo/examples/winit_minimal.rs= (194 lines).
+  https://github.com/servo/servo/blob/main/components/servo/examples/winit_minimal.rs
+- =servo_remutex= (mentioned in older eservo lore) does NOT exist in
+  current main (absent from workspace and servo crate manifests).
+- The Servo Book (https://book.servo.org, print.html) is
+  contributor-oriented; it documents embedder internals like
+  =EmbedderMessage::AccessibilityTreeUpdate= →
+  =WebViewDelegate::notify_accessibility_tree_update=, but has no
+  "how to embed Servo" chapter (grep: "cdp" 0 hits; "embedding" only as
+  internals context).
+
+* The winit_minimal example (the embedding recipe, verified)
+
+#+begin_src rust
+let servo = ServoBuilder::default()
+    .event_loop_waker(Box::new(waker))   // embedder_traits::EventLoopWaker
+    .build();
+let webview = WebViewBuilder::new(&servo, rendering_context)
+    .url(url)
+    .hidpi_scale_factor(..)
+    .delegate(app_state)                 // servo::WebViewDelegate
+    .build();
+// pump:
+servo.spin_event_loop();
+// frame-ready arrives via WebViewDelegate::notify_new_frame_ready
+webview.paint();
+rendering_context.present();
+// input injection:
+webview.notify_input_event(InputEvent::Wheel(WheelEvent::new(..)));
+#+end_src
+
+Source: components/servo/examples/winit_minimal.rs (URL above).
+
+* Rendering contexts — the offscreen answer (verified)
+
+From =components/shared/paint/rendering_context.rs=
+https://github.com/servo/servo/blob/main/components/shared/paint/rendering_context.rs :
+
+- Trait =RenderingContext=: =prepare_for_rendering()=,
+  =read_to_image(DeviceIntRect) -> Option<image::RgbaImage>= (reads
+  pixels back!), =size()=, =resize()=, =present()=, =make_current()=,
+  =gleam_gl_api()= / =glow_gl_api()=, texture + adapter plumbing.
+  All four context types are re-exported at the =servo= crate root
+  (components/servo/lib.rs):
+  #+begin_src rust
+  pub use paint_api::rendering_context::{
+      OffscreenRenderingContext, RenderingContext, SoftwareRenderingContext,
+      WindowRenderingContext,
+  };
+  #+end_src
+- =WindowRenderingContext::new(display_handle, window_handle, size)= —
+  needs a REAL window (raw-window-handle). Not our path.
+- =OffscreenRenderingContext= — despite the name, it is an FBO that
+  blits into a *parent* =WindowRenderingContext= (constructor is
+  =WindowRenderingContext::offscreen_context=). Still needs a window.
+  NOT a headless path.
+- =SoftwareRenderingContext::new(size: PhysicalSize<u32>)= — creates a
+  surfman *software adapter* (comment in-tree references OSMesa
+  headless quirks, issue #18606), no window required;
+  =read_to_image= gives an =RgbaImage=. In-tree unit test
+  =test_read_pixels= exercises this path. → *This is the eservo v0
+  offscreen surface.*
+- servoshell's own headless mode uses exactly this:
+  =ports/servoshell/desktop/headless_window.rs= holds a
+  =Rc<SoftwareRenderingContext>= created via
+  =SoftwareRenderingContext::new(physical_size)=.
+  https://github.com/servo/servo/blob/main/ports/servoshell/desktop/headless_window.rs
+
+* WebView API surface (verified, components/servo/webview.rs)
+
+https://github.com/servo/servo/blob/main/components/servo/webview.rs
+Relevant to eservo:
+
+- Navigation: =load(Url)=, =reload=, =go_back/go_forward=,
+  =clear_session_history=, =url()=, =page_title()=, =load_status()=.
+- Input injection: =notify_input_event(InputEvent) -> InputEventId=,
+  =notify_scroll_event=, =set_focused=, =resize=, =set_page_zoom=.
+- Scripting: =evaluate_javascript= (returns serialized values via
+  =JSValue= in embedder_traits).
+- Screenshots: =take_screenshot(Option<WebViewRect>, callback)= —
+  waits for load events + render-blocking elements before firing;
+  =ScreenshotCaptureError= in embedder_traits.
+- Accessibility: =set_accessibility_active= (accesskit tree updates via
+  =WebViewDelegate::notify_accessibility_tree_update= — documented in
+  the Servo Book print.html).
+- User content: =user_content_manager()= (user scripts/styles).
+- Delegates (embedder_traits / components/servo/webview_delegate.rs):
+  dialogs incl. =AuthenticationRequest= (HTTP auth!), permission
+  requests, file pickers, =CreateNewWebViewRequest= — these map cleanly
+  onto Emacs minibuffer prompts.
+
+* Input events (verified)
+
+=components/shared/embedder/input_events.rs=
+https://github.com/servo/servo/blob/main/components/shared/embedder/input_events.rs
+#+begin_src rust
+pub enum InputEvent {
+    EditingAction(ClipboardAction),
+    Gamepad(GamepadEvent),
+    Ime(ImeEvent),
+    Keyboard(KeyboardEvent),
+    MouseButton(MouseButtonEvent),
+    MouseLeftViewport(MouseLeftViewportEvent),
+    MouseMove(MouseMoveEvent),
+    Touch(TouchEvent),
+    Wheel(WheelEvent),
+}
+#+end_src
+(verified enum variant list; field-level construction is S0.2 work.)
+
+* Servo handle (verified, components/servo/servo.rs)
+
+- =ServoBuilder::default()= → =.opts(Opts)= / =.preferences(Preferences)=
+  / =.event_loop_waker= / =.protocol_registry= / =.build() -> Servo=.
+- =Servo::spin_event_loop()= (pump), =setup_logging()=,
+  =execute_webdriver_command(WebDriverCommandMsg)= (in-process
+  WebDriver command execution!), =set_preference=,
+  =network_manager()= (NetworkManager + CacheEntry),
+  =site_data_manager()=, =create_memory_report=.
+  https://github.com/servo/servo/blob/main/components/servo/servo.rs
+
+* Cookies / sessions / profile (verified)
+
+- =SiteDataManager= (components/servo/site_data_manager.rs):
+  =clear_site_data=, =clear_cookies=, =clear_session_cookies=,
+  =cookies_for_url(_async)=, =set_cookie_for_url=.
+  https://github.com/servo/servo/blob/main/components/servo/site_data_manager.rs
+- =Opts= (components/config/opts.rs) has =config_dir: Option<PathBuf>=
+  ("Directory for a default config directory") and =temporary_storage=
+  ("data on disk will not persist across restarts") → persistent
+  profile plumbing exists at engine level.
+  https://github.com/servo/servo/blob/main/components/config/opts.rs
+- S0.3 (specs/0030) must still prove what config_dir persists on disk
+  (cookie jar location, format) — =VERIFY=.
+
+* servo-capi: a C ABI for embedding (verified, young)
+
+=ffi/capi= ("servo-capi"), README quote: "This crate provides a C FFI
+wrapper for Servo's native Rust API. The goal is to allow Servo to be
+consumed by embedders in other languages and eventually also provide a
+stable ABI…". Tests in =tests/capi=.
+https://github.com/servo/servo/tree/main/ffi/capi
+Exported C functions (verified by reading the source):
+- =servo_builder_set_preferences / set_options / set_event_loop_waker /
+  build / free=
+- =servo_webview_builder_create / set_url / set_delegate / build / free=
+- =servo_webview_paint / load / resize / take_screenshot /
+  set_hidpi_scale_factor / get_hidpi_scale_factor / free=
+- =servo_spin_event_loop / setup_logging / free=,
+  =servo_rendering_context_free=
+- NOTE: no =notify_input_event= C export yet → input injection from a C
+  embedder currently requires wrapping Rust libservo directly (our
+  module would), or upstreaming a capi function (possible upstream
+  contribution).
+
+* servoshell = reference embedder (verified)
+
+- Flags parsed in =ports/servoshell/prefs.rs= (bpaf):
+  - =--headless= → =ServoShellEventLoop::headless()= →
+    SoftwareRenderingContext window.
+  - =--webdriver [PORT]= (default 7000) "Start remote WebDriver server
+    on port" → =webdriver_server::start_server=.
+  - =-o/--output test.png= — screenshot to image file.
+  - also =--userscripts=, =-u/--user-agent=, =--screen-size=,
+    =--simulate-touch-events=, multiprocess toggles.
+  https://github.com/servo/servo/blob/main/ports/servoshell/prefs.rs
+  https://github.com/servo/servo/blob/main/components/webdriver_server/lib.rs
+- WebDriver server crate: =components/webdriver_server= (actions,
+  capabilities, session, timeouts, user prompts).
+  https://github.com/servo/servo/tree/main/components/webdriver_server
+
+* Devtools / CDP status — the hard truth (verified)
+
+- The =devtools= crate is an *actor-based remote devtools server
+  implementing the Firefox devtools protocol* ("Only tested with
+  nightly Firefox versions" — crate doc comment). NOT CDP.
+  https://github.com/servo/servo/blob/main/components/devtools/lib.rs
+- CDP implementation attempt: issue/PR #18133 "[WIP] Chrome DevTools
+  Protocol implementation" — CLOSED, not merged.
+  https://github.com/servo/servo/issues/18133
+- WebDriver BiDi: open feature request #42766.
+  https://github.com/servo/servo/issues/42766
+- Servo Book contains zero CDP mentions (print.html grep).
+- ⇒ eservo must NOT assume CDP. Driving surfaces available today:
+  1) libservo in-process API (=notify_input_event=, JS eval, …),
+  2) W3C WebDriver (servoshell =--webdriver=),
+  3) devtools protocol (Firefox-flavored, low value for us).
+  Whether servo's WebDriver supports cookie/storage commands
+  (W3C "Get All Cookies" etc.) = VERIFY (questions.org).
+
+* Platform support (verified)
+
+- servo README documents builds for macOS, Linux, Windows, OpenHarmony,
+  and Android (Android section with ANDROID_SDK_ROOT/NDK instructions).
+  https://github.com/servo/servo/blob/main/README.md
+- Android-specific target deps exist in the servo crate manifest
+  (e.g. pasteboard/media/ohos gating), i.e. Android is a build target,
+  not an afterthought.
+
+* API stability caveats (verified signals)
+
+- libservo is not a frozen API: in-tree TODOs like "This should be
+  replaced with an API on ServoBuilder. See
+  https://github.com/servo/servo/issues/40950" (resources export) and
+  the public-export policy issue #18475 referenced in lib.rs.
+  ⇒ pin a rev; re-verify on every bump; keep the servo-touching surface
+  thin and centralized in =rust/eservo-core=.
+
+* Verdict for eservo
+
+An offscreen/embedding path EXISTS today and is exercised in-tree:
+=SoftwareRenderingContext= + =WebViewBuilder= + =notify_input_event= +
+=evaluate_javascript= + =take_screenshot= + =SiteDataManager= +
+=Opts.config_dir=. The cheapest complete v0 is a Rust embedder (like
+winit_minimal, minus the window) — which is exactly spike S0.1.

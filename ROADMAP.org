@@ -1,0 +1,122 @@
+#+TITLE: eservo ROADMAP — phased milestones
+#+OPTIONS: toc:1
+
+Phases are gates, not calendar promises. A phase exits only when its
+exit criteria hold; evidence goes in RESEARCH/ + spike artifacts.
+Phase 0 exists to *kill* wrong approaches cheaply (two earlier eservo
+proposals died; this one earns the right to grow).
+
+* Phase 0 — Research spikes (NOW)
+
+Each spike: a throwaway harness, one question, one artifact. Specs in
+=specs/0010..0030=. Transport decision (module vs process+IPC) is taken
+*after* S0.1–S0.3, based on evidence (RESEARCH/alternatives.org).
+
+** S0.1 Offscreen render spike — "can Servo paint into RAM?"
+- What: standalone Rust example (in =native/=) that embeds the
+  =servo= crate from git, renders a page via =SoftwareRenderingContext=,
+  writes a PNG (Servo's own =WebView::take_screenshot= /
+  =RenderingContext::read_to_image= path — see RESEARCH/servo-embedding.org).
+- Exit criteria:
+  - PNG of a real https page on disk, non-blank (pixel variance check).
+  - Pinned servo rev + working build recipe committed.
+  - Time-to-first-frame and per-frame cost measured.
+- Risk: servo git dep build is heavy (full workspace); software GL
+  (OSMesa-class adapter) may be missing on the box → record failure
+  honestly, that is the result. API churn between servo revs.
+
+** S0.2 Input injection spike — "can we type and click?"
+- What: extend the S0.1 harness with =WebView::notify_input_event=
+  (Keyboard / MouseButton / MouseMove events from
+  =components/shared/embedder/input_events.rs=) against a local HTML test
+  page; verify effect via =WebView::evaluate_javascript=.
+- Exit criteria:
+  - Typed text lands in an <input> (read back via JS eval).
+  - A click toggles visible DOM state.
+  - Coordinate mapping (device px vs CSS px, hidpi) documented.
+- Risk: event structs need exact field construction; IME/composition
+  events more complex than raw keys (out of scope for S0.2).
+
+** S0.3 Session / cookie spike — "does identity survive restart?"
+- What: configure Servo =Opts.config_dir= (profile dir); visit a
+  cookie-setting page; kill the process; restart; prove the cookie
+  survives. Exercise =SiteDataManager= (cookies_for_url /
+  clear_cookies / clear_session_cookies).
+- Exit criteria:
+  - Cookie persists across full process restart (file path of the jar
+    documented).
+  - clear_cookies + clear_session_cookies behave as named.
+  - Stretch: real login on a low-friction site. chat.qwen.ai / z.ai
+    live-login is explicitly Phase 1+ (anti-bot fingerprint risk).
+- Risk: profile layout may change across servo revs; some cookies are
+  session-scoped and must NOT survive (document the split).
+
+** S0.4 TTY render spike — "pixels in a terminal, how bad?"
+- What: push S0.1 frames through a terminal graphics path: encode PNG →
+  sixel (=img2sixel= from libsixel) or kitty graphics protocol, display
+  in =emacs -nw= via =kitty-graphics.el=-class mechanism
+  (RESEARCH/tty-rendering.org).
+- Exit criteria:
+  - A static page is visible in =emacs -nw= on one sixel terminal and
+    one kitty-graphics terminal.
+  - Refresh latency measured for 1024x768 and 640x480.
+- Risk: mainline Emacs has NO terminal image support (verified) — we
+  depend on a third-party package + terminal capability; latency may
+  cap fps at "slideshow" (acceptable for scripting; document it).
+
+** S0.5 Zero-code baseline — "what does headless servoshell give today?"
+- What: run stock servoshell: =servoshell --headless --webdriver 7000 -o
+  shot.png <URL>= (flags verified in RESEARCH/servo-embedding.org);
+  drive it over WebDriver from elisp (=url.el= + JSON).
+- Exit criteria: screenshot artifact + one WebDriver session from
+  Emacs showing =M-x eservo-…= could be a pure-process v0.
+- Risk: none (this is the floor against which the module approach must
+  justify itself).
+
+* Phase 1 — Linux in-Emacs (transport decided)
+
+- Wire the S0.1–S0.3 harness to Emacs via the transport chosen on spike
+  evidence (dynamic module in-process vs helper process + IPC —
+  RESEARCH/alternatives.org).
+- =eservo-open= renders into a buffer (image display), input events
+  forwarded, delegate dialogs (auth prompts!) routed to Emacs
+  minibuffer.
+- Exit: CHARTER "Linux" criteria hold on one machine + CI-ish recipe.
+- Risk: module ABI/threading (servo wants an embedder event loop via
+  EventLoopWaker — must coexist with Emacs' loop); crash containment.
+
+* Phase 2 — TTY
+
+- Integrate the S0.4 path: same elisp API, display backend switches to
+  terminal graphics; text-only fallback (link/title/step log) when the
+  terminal cannot do graphics.
+- Exit: CHARTER "TTY" criteria.
+- Risk: third-party package churn; bandwidth of re-encoding frames.
+
+* Phase 3 — Android
+
+- Offscreen servo → PNG → =create-image= in Emacs-on-Android buffer
+  (RESEARCH/android-display.org). Module cross-compile is a *spike
+  inside the phase*, fallback = process+IPC over TCP/adb.
+- Exit: CHARTER "Android" criteria on one device or emulator.
+- Risk: dynamic modules on Android Emacs = VERIFY; NDK build of servo
+  (upstream supports Android targets, but our module is unproven).
+
+* Phase 4 — Scripting API v1
+
+- Make =elisp/eservo.el= real: =eservo-script-define= / =eservo-script-run=
+  with steps navigate/click/fill/wait-for/expect/extract/screenshot/
+  submit, persistent sessions, headless execution, step log.
+- Exit: one end-to-end script (test-site login + form submit) runs
+  green headless and in CI; failure modes loud.
+- Risk: selector engine choice (accessibility tree vs DOM query via
+  JS eval — pick after S0.2 evidence).
+
+* Phase 5 — Agent driving
+
+- Agent-facing surface: run a script, poll step log, get structured
+  results; maybe expose as an Emacs command server. No AI inside.
+- Exit: an agent (external program) completes a scripted task using
+  only the public API; audit trail replayable.
+- Risk: scope creep into "agent framework" — resist; eservo stays the
+  browser surface.

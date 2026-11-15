@@ -1,0 +1,56 @@
+#+TITLE: SPEC 0000 — Spec-driven process for eservo
+#+OPTIONS: toc:1
+
+* Purpose
+
+Make every change small, falsifiable, and reviewable-later. This repo
+survived zero rejections so far by *not* repeating the pattern that
+killed two earlier eservo proposals (big-bang architecture; details
+unavailable — see V-P1).
+
+* Workflow
+
+1. *Spec first.* Any non-trivial change starts as
+   =specs/NNNN-name.org= (NNNN in steps of 10). A spec contains:
+   - Question / motivation (one paragraph),
+   - Approach (terse),
+   - *Acceptance criteria* in Given/When/Then form, each independently
+     checkable,
+   - Evidence to attach (artifact paths),
+   - Risks / fail conditions (a spec that can't fail is not a spec).
+2. *Spike or code.* Implement against the spec; commit in small steps
+   on =ai/main= with evidence in the message body (WORKFLOW.org).
+3. *Verify now.* The agent runs whatever check is runnable in its
+   environment (cargo check, artifact diff, URL re-fetch). What cannot
+   be run goes to RESEARCH/questions.org as =VERIFY=.
+4. *Review later.* Humans work the REVIEW queue table in WORKFLOW.org.
+   No blocking on review for research/spike work; blocking for
+   anything user-facing (Phase 1+).
+
+* Rules of evidence
+
+- Servo/Emacs API claims require an upstream URL with a fetched-on
+  date, or an artifact from our own spike. No invented APIs — ever.
+- Research notes are dated; stale > 90 days → re-verify or mark STALE.
+- Spike artifacts live under =evidence/<spec-id>/= and are committed
+  (PNGs, logs, timings — small and textual where possible).
+- Failure evidence counts: "S0.1 build failed with X on date Y at rev
+  Z" is a legitimate, committable result.
+
+* Numbering
+
+| Range    | Use                                              |
+|----------+--------------------------------------------------|
+| 00xx     | Process / meta specs                             |
+| 10xx     | Phase 0 spikes (S0.N map to 001x)                |
+| 20xx     | Phase 1 Linux                                    |
+| 30xx–50xx| Later phases                                     |
+
+* Current spec registry
+
+| Spec   | Title                     | Status        |
+|--------+---------------------------+---------------|
+| 0000   | Spec-driven process       | ACTIVE        |
+| 0010   | S0.1 offscreen render     | READY TO RUN  |
+| 0020   | S0.2 input injection      | READY TO RUN  |
+| 0030   | S0.3 session/cookie       | READY TO RUN  |

@@ -1,0 +1,60 @@
+#+TITLE: SPEC 0020 — S0.2 Input injection spike
+#+OPTIONS: toc:1
+
+* Question
+
+Can an embedder drive a page — type text and click — through the
+libservo API (=WebView::notify_input_event=), and observe the effect
+programmatically (=WebView::evaluate_javascript=)?
+
+Depends on: 0010 harness building and rendering.
+
+* Approach
+
+- Local test page (committed under =evidence/s0.2/test-page.html=):
+  an =<input id="t">=, a =<button id="b">= that toggles
+  =document.title= and a =<span>=, some CSS for a fixed layout.
+- Extend the 0010 example (new example =input_injection=):
+  1. after load, focus the input via a click at its coordinates
+     (=:notify_input_event MouseMove+MouseButton= at the input's
+     bounding-box center, from JS-measured =getBoundingClientRect=),
+  2. send =Keyboard= events spelling "eservo",
+  3. read back =document.getElementById('t').value= via
+     =evaluate_javascript=,
+  4. click the button, read back the toggled state.
+- Record =InputEventId= returns and any delegate messages observed.
+
+* Acceptance criteria
+
+- AC1 :: *Given* the loaded test page, *when* Keyboard events for
+  "eservo" are injected into the focused input, *then* JS-eval of the
+  input's =.value= returns exactly "eservo".
+- AC2 :: *Given* the button at measured coordinates, *when* a
+  MouseButton press+release is injected there, *then* the page's
+  toggle state flips (read back via JS-eval).
+- AC3 :: *Given* both flows, *then* the run log documents the exact
+  event structs constructed (field values) and the coordinate mapping
+  used (device px ↔ CSS px, hidpi factor) — this is the transfer
+  document for Phase 1.
+- AC4 :: *Given* a MouseMove to a link, *then* the delegate sees the
+  expected cursor/hover message (documents the EmbedderMsg feedback
+  channel) — nice-to-have; failure recorded, not blocking.
+
+* Fail conditions
+
+- Keyboard events with our best-guess field construction produce no
+  text → record exact struct definitions used + servo rev; consult
+  =input_events.rs= + =keyboard-types= re-exports; if still dead, that
+  is real evidence against the in-process interactive path (Option A)
+  and in favor of WebDriver-only interaction.
+- Coordinates land wrong under hidpi → document the transform needed.
+
+* Risks
+
+- IME/composition subtleties (out of scope: raw Keyboard events only
+  in S0.2).
+- =JSValue= serialization surprises (feeds V-S6).
+
+* Out of scope
+
+Wheel/touch events, gestures, real-site interaction, cookies.
