@@ -37,7 +37,7 @@ servo = { version = "=0.8.0", optional = true, default-features = false, feature
     "baked-in-resources",
     "brotli-compression-stream",
     "js_jit",
-    "webcrypto",
+    "subtlecrypto",
 ] }
 # Types crossing the servo API (Size2D for resize, Scale for hidpi,
 # Url for navigation).  These must stay version-compatible with what
