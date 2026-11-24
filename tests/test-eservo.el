@@ -71,10 +71,13 @@
      (should (string-match-p "eservo-stop" (error-message-string err))))))
 
 (ert-deftest eservo-commands-require-start ()
-  "Commands without a running driver must fail with a helpful error."
+  "With `eservo-auto-start' nil commands fail with a helpful error.
+(The default since the Emacshell field report is auto-start; the
+explicit-only contract lives on for scripts via that variable.)"
   (eservo-test--with-stub
-   (let ((err (should-error (eservo-goto "https://x/"))))
-     (should (string-match-p "eservo-start" (error-message-string err))))))
+   (let ((eservo-auto-start nil))
+     (let ((err (should-error (eservo-goto "https://x/"))))
+       (should (string-match-p "eservo-start" (error-message-string err)))))))
 
 (ert-deftest eservo-goto-dispatches-and-updates-url ()
   (eservo-test--with-stub

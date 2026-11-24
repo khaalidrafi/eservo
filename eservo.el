@@ -43,8 +43,10 @@
 ;;   `auth-source' only -- never plaintext, never printed.
 ;;
 ;; Typical agent cycle:
-;;   M-x eservo-start  M-x eservo-goto  M-x eservo-snapshot
+;;   M-x eservo-goto  M-x eservo-snapshot
 ;;   ... read refs [N] ... M-x eservo-click / eservo-fill ... repeat.
+;; (A browser auto-starts on first use with the best backend that runs
+;; here; M-x eservo-start is only needed to pin a specific backend.)
 
 ;;; Code:
 
@@ -56,49 +58,166 @@
   :prefix "eservo-"
   :group 'applications)
 
-(defcustom eservo-backend 'cdp
-  "Default backend used by `eservo-start'.
-`cdp' drives Chromium/Chrome via the DevTools Protocol; `embedded'
-runs the servo engine INSIDE the Emacs process through the optional
-libeservo dynamic module (M-x eservo-embedded-load-module; see
-docs/EMBEDDED-SERVO.org); `servo' drives a servo over its devtools
-server (launch on desktop, or attach from Android/Termux via
-`eservo-servo-port'); `adb' drives an Android device browser over
-`adb shell' (best effort)."
+(defcustom eservo-backend 'auto
+  "Backend used by `eservo-start'.
+`auto' (the default) picks the first backend that can actually run
+HERE, in this order: `embedded' (the libeservo module, when it is
+installed and loadable), `cdp' (a chromium/chrome in PATH, or a
+configured DevTools port), `servo' (servoshell/servo in PATH, a
+configured devtools port, or the on-device servo APK lane on
+Android) and `adb' (adb in PATH).  When nothing works the error
+lists WHY each backend was rejected, instead of failing deep inside
+one of them with a misleading message (e.g. \\='no chromium binary\\='
+on a machine whose real problem is that the embedded module was
+never installed).
+An explicit value skips detection: `cdp' drives Chromium/Chrome via
+the DevTools Protocol; `embedded' runs the servo engine INSIDE the
+Emacs process through the optional libeservo dynamic module (M-x
+eservo-embedded-load-module; see docs/EMBEDDED-SERVO.org); `servo'
+drives a servo over its devtools server (launch on desktop, or
+attach from Android/Termux via `eservo-servo-port'); `adb' drives an
+Android device browser over `adb shell' (best effort)."
   :group 'eservo
-  :type '(choice (const :tag "Chromium/Chrome via CDP" cdp)
+  :type '(choice (const :tag "Auto-detect (embedded first)" auto)
+                 (const :tag "Chromium/Chrome via CDP" cdp)
                  (const :tag "Servo engine embedded in Emacs" embedded)
                  (const :tag "Servo engine via RDP devtools" servo)
                  (const :tag "Android device via adb" adb)
                  (symbol :tag "Other registered backend")))
 
+(defcustom eservo-auto-start t
+  "When non-nil (the default), any eservo command that needs a
+browser starts one automatically via `eservo-start' instead of
+erroring \='no browser started\='.  Interactive use should never have
+to know about `eservo-start' first -- that ceremony existed only for
+the v0.1 script runner.  Set nil to restore the explicit-only
+behavior (scripts that want to control WHEN a browser launches)."
+  :group 'eservo
+  :type 'boolean)
+
 (defvar eservo--current-driver nil
   "The one live browser-driving session, or nil.
 Set by `eservo-start', cleared by `eservo-stop'.")
 
+(defconst eservo--auto-order '(embedded cdp servo adb)
+  "Preference order `eservo-backend' \='auto' probes backends in.
+Registry backends (registered by users/tests via
+`eservo-backend-registry') are not probed: an unknown backend has no
+availability probe, so auto would be guessing.  Name one explicitly.")
+
+;; Probe-time references into the backend files (each is (require)d
+;; on demand inside `eservo--backend-reason'; declaring them here
+;; keeps byte-compile warning-free without loading eagerly).
+(declare-function eservo-embedded-available-p "eservo-embedded" ())
+(declare-function eservo-embedded-load-module "eservo-embedded" ())
+(declare-function eservo-servo-android--am-executable "eservo-servo" ())
+(defvar eservo-cdp-port nil)
+(defvar eservo-cdp-program nil)
+(defvar eservo-servo-port nil)
+(defvar eservo-servo-program nil)
+(defvar eservo-adb-program nil)
+
+(defun eservo--backend-reason (name)
+  "Return nil when backend NAME looks startable here, else a why-not string.
+Best-effort and side-effect-light: probing `embedded' may LOAD the
+module (loading it is what using it means); the other probes only
+look for binaries and configured ports."
+  (pcase name
+    (`embedded
+     (if (and (require 'eservo-embedded nil t)
+              (or (eservo-embedded-available-p)
+                  (condition-case nil
+                      (progn (eservo-embedded-load-module) t)
+                    (error nil))))
+         nil
+       "the libeservo module is not installed (docs/EMBEDDED-SERVO.org)"))
+    (`cdp
+     (if (and (require 'eservo-cdp nil t)
+              (or eservo-cdp-port
+                  (seq-some #'executable-find
+                            (append eservo-cdp-program nil))))
+         nil
+       "no chromium/chrome in PATH (set `eservo-cdp-program')"))
+    (`servo
+     (if (and (require 'eservo-servo nil t)
+              (or eservo-servo-port
+                  (if (eq system-type 'android)
+                      (eservo-servo-android--am-executable)
+                    (seq-some #'executable-find
+                              (append eservo-servo-program nil)))))
+         nil
+       "no servoshell/servo in PATH and no devtools port"))
+    (`adb
+     (if (and (require 'eservo-adb nil t)
+              (executable-find eservo-adb-program))
+         nil
+       "no adb in PATH (Termux: pkg install android-tools)"))
+    (_ (format "unknown backend `%s'" name))))
+
+(defun eservo--resolve-backend ()
+  "Return the backend symbol `eservo-start' should use now.
+Honours `eservo-backend': \='auto probes `eservo--auto-order' and
+returns the first startable backend, erroring with the collected
+per-backend reasons when none is.  Any other value passes through
+unchanged."
+  (if (eq eservo-backend 'auto)
+      (let ((reasons nil))
+        (or (cl-some
+             (lambda (name)
+               (let ((reason (eservo--backend-reason name)))
+                 (cond (reason (push (cons name reason) reasons) nil)
+                       (t name))))
+             eservo--auto-order)
+            (error "eservo: no usable browser backend on this machine:%s"
+                   (mapconcat (lambda (r)
+                                (format "\n  %s: %s" (car r) (cdr r)))
+                              (nreverse reasons)
+                              ""))))
+    eservo-backend))
+
 (defun eservo--driver-or-error ()
-  "Return `eservo--current-driver', erroring with a helpful hint."
-  (or eservo--current-driver
-      (error "eservo: no browser started (run eservo-start)")))
+  "Return the live driver, auto-starting one when `eservo-auto-start'.
+A driver whose backend died is transparently restarted; a live one
+is returned as-is.  With `eservo-auto-start' nil this is the old
+explicit-only behavior with the helpful hint."
+  (cond
+   ((and eservo--current-driver
+         (eservo-backend-call eservo--current-driver 'alive-p))
+    eservo--current-driver)
+   (eservo-auto-start
+    (eservo-start))
+   (t
+    (error "eservo: no browser started (run M-x eservo-start)"))))
 
 (defun eservo--backend-symbol ()
   "Backend symbol chosen by \\[universal-argument] or `eservo-backend'."
   (if current-prefix-arg
       (intern (completing-read "eservo backend: "
-                               (mapcar #'car (eservo-backend-registered))
+                               (cons 'auto
+                                     (mapcar #'car
+                                             (eservo-backend-registered)))
                                nil t))
-    eservo-backend))
+    (if (eq eservo-backend 'auto)
+        'auto
+      eservo-backend)))
 
 ;;;###autoload
 (defun eservo-start (&optional backend)
   "Start a browser session via BACKEND (default `eservo-backend').
 With \\[universal-argument] prompt for the backend.
-Returns the driver.  Errors with a hint if one is already live."
+Returns the driver.  A DEAD previous driver is stopped quietly and
+replaced; only a live one is an error (run `eservo-stop' first)."
   (interactive (list (eservo--backend-symbol)))
   (when (and eservo--current-driver
              (eservo-backend-call eservo--current-driver 'alive-p))
     (error "eservo: browser already started (run eservo-stop first)"))
-  (let* ((backend-name (or backend eservo-backend))
+  (when eservo--current-driver
+    ;; Dead driver: stop quietly (backends tolerate double-stop) so its
+    ;; resources are released before the replacement boots.
+    (ignore-errors (eservo-backend-call eservo--current-driver 'stop)))
+  (let* ((backend-name (if (memq backend '(nil auto))
+                           (eservo--resolve-backend)
+                         backend))
          (driver (eservo--driver-make
                   :backend (eservo-backend-make backend-name)
                   :name (symbol-name backend-name))))
